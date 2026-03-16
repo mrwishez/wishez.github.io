@@ -4,11 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IDECO NGFW — Architecture Map</title>
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #100F26; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
-#root { width: 100vw; height: 100vh; }
-</style>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#100F26;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}#root{width:100vw;height:100vh}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -16,443 +12,177 @@ body { background: #100F26; font-family: system-ui, -apple-system, sans-serif; o
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const { useState, useRef, useCallback, useEffect, useMemo } = React;
-
-/* Ideco corporate colors */
-var O="#FF5A1A",Ob="#E77C06",BG="#100F26",CD="#1a1938",BD="#2d2856";
-var TX="#E1EAF9",TM="#8b8aaa",TD="#5a5880";
-var O1="#FF5A1A",O2="#ff7a4a",O3="#ff9a6a",O4="#cc4815",O5="#993610";
-var CE="#7ab8e0",CC=O,CS="#b89ae0",CR="#e0a84a";
-var DM="#4ecdc4";
-var INFRA_LABEL="INFRASTRUCTURE";
-
-var LAYERS=[
-  {id:"mgmt",label:"MANAGEMENT PLANE",desc:"UI, API, отчёты, журналы, аудит",color:O2},
-  {id:"ctrl",label:"CONTROL PLANE",desc:"Файрвол, аутентификация, сеть, безопасность, VPN, маршрутизация",color:O3},
-  {id:"data",label:"DATA PLANE",desc:"VPP/DPDK, eBPF, Suricata IPS, DPI, eCAP",color:O},
-];
-
-var LAYER_DESC={
-  mgmt:"Management Plane — уровень управления и мониторинга.\n\nОтвечает за всё взаимодействие администратора и внешних систем с NGFW. Включает:\n\n• Веб-интерфейс администратора (Nginx + aiohttp) — полнофункциональная панель управления с ролевой моделью доступа (суперадмин, МСЭ-администратор, ИБ-администратор, аудитор). Поддерживает 2FA через TOTP, SMS и Multifactor.\n\n• Личный кабинет пользователя — портал самообслуживания для конечных пользователей: смена пароля, просмотр статистики, скачивание VPN-профилей.\n\n• REST API (OpenAPI) — программный интерфейс для интеграции с SIEM/SOAR-системами.\n\n• Мониторинг — сбор метрик CPU/RAM/диск/сеть в ClickHouse, интеграция с Zabbix, SNMP v2c/v3.\n\n• Движок отчётов — конструктор отчётов с агрегацией из ClickHouse.\n\n• Аудит — фиксация всех действий администраторов.",
-  ctrl:"Control Plane — уровень конфигурации и политик безопасности.\n\nЦентральный уровень бизнес-логики NGFW. Каждый бэкенд этого уровня:\n1) Принимает конфигурацию от Management Plane через etcd\n2) Валидирует и трансформирует правила\n3) Записывает результат в etcd (PERMANENT / RUNTIME)\n4) Daemon'ы подхватывают изменения через etcd watch\n\nОсновные домены: Аутентификация, Межсетевой экран, Сетевые сервисы, Безопасность, VPN, Маршрутизация.",
-  data:"Data Plane — уровень обработки сетевого трафика.\n\nВысокопроизводительные компоненты на C/C++.\n\nАрхитектура обработки пакета:\n1) VPP/DPDK → 2) eBPF ACL (XDP) → 3) VPP graph nodes → 4) NFQUEUE → Suricata IPS → 5) eCAP-модули в Squid → 6) DPI L7 (nDPI)",
-  infra:"Infrastructure — инфраструктурный и системный уровень.\n\nФундамент: ядро системы, лицензирование, бэкапы, обновления, кластеризация (HA Active-Passive), VCE (виртуальные контексты).\n\nХранилища: etcd (конфигурация), ClickHouse (логи), SQLite (кэш), RocksDB (URL-категории).",
-  daemon:"System Daemons — уровень системных служб.\n\nРеальные процессы ОС: обработка трафика, DNS, VPN, маршрутизация и т.д.\n\nБэкенды записывают конфигурацию в etcd, daemon'ы получают и применяют.",
-};
-
-var DOMS={
-  ui:{l:"Веб-интерфейс",ly:"mgmt",c:O2},
-  rpt:{l:"Отчёты и журналы",ly:"mgmt",c:O3},
-  api_d:{l:"API и мониторинг",ly:"mgmt",c:O1},
-  auth_c:{l:"Аутентификация",ly:"ctrl",c:O2},
-  fw_c:{l:"Файрвол и объекты",ly:"ctrl",c:O},
-  net_c:{l:"Сетевые сервисы",ly:"ctrl",c:O3},
-  sec_c:{l:"Безопасность",ly:"ctrl",c:Ob},
-  vpn_c:{l:"VPN и туннели",ly:"ctrl",c:O4},
-  rt_c:{l:"Маршрутизация",ly:"ctrl",c:O2},
-  acl_d:{l:"Фильтрация",ly:"data",c:O},
-  px_d:{l:"Прокси и DPI",ly:"data",c:Ob},
-  vpp_d:{l:"VPP / сеть",ly:"data",c:O4},
-  st_d:{l:"Статистика",ly:"data",c:O2},
-  sys_i:{l:"Ядро и управление",ly:"infra",c:O3},
-  ha_i:{l:"Кластер и HA",ly:"infra",c:O2},
-  db_i:{l:"Хранилища",ly:"infra",c:TM},
-};
-
-var DOM_DESC={
-  ui:"Веб-интерфейс администратора и личный кабинет пользователя. Nginx + aiohttp. Ролевая модель, 2FA, Telegram-уведомления.",
-  rpt:"Движок отчётов (ClickHouse → графики), журналирование (Syslog), аудит действий.",
-  api_d:"REST API (OpenAPI) для внешнего управления и мониторинг: метрики, Zabbix, SNMP.",
-  auth_c:"Аутентификация: AD, ALD Pro, RADIUS, Kerberos SSO, captive portal, 2FA.",
-  fw_c:"Межсетевой экран (FORWARD/INPUT/DNAT/SNAT), объектная модель (alias), QoS-шейпер.",
-  net_c:"DNS (Unbound), DHCP, сетевые интерфейсы (L2-manager), IGMP Proxy.",
-  sec_c:"Контент-фильтр, IPS Suricata, антивирус, WAF, прокси, обратный прокси, PKI.",
-  vpn_c:"VPN-серверы (IKEv2/L2TP/SSTP/WG/OVPN), IPSec site-to-site, ГОСТ VPN, Ideco Client.",
-  rt_c:"Маршрутизация: статическая, PBR, BGP, OSPF, балансировка WAN, failover (FRRouting).",
-  acl_d:"Трансляция правил МСЭ в eBPF/VPP ACL. Захват событий NFLOG → ClickHouse.",
-  px_d:"eCAP-модули Squid (AV, URL-фильтр, морфоанализ), DPI L7 через NFQUEUE (nDPI).",
-  vpp_d:"VPP (fd.io): DPDK PMD, AF_XDP, KNI-интерфейсы, L2-бриджи.",
-  st_d:"Сбор DPI-статистики (flow-stat), мониторинг conntrack (trafmond).",
-  sys_i:"system-backend (ядро), лицензии, бэкапы, обновления, почтовый релей, VCE, Ideco Center.",
-  ha_i:"Отказоустойчивый кластер Active-Passive, VRRP (keepalived), синхронизация.",
-  db_i:"etcd (PERMANENT + RUNTIME), ClickHouse (аналитика), SQLite (кэш), RocksDB (URL).",
-};
-
-var DB_MAP={
-  etcd_direct:["system-backend","alias-backend","firewall-backend","auth-backend","web-backend","reports-backend","monitor-backend","routing-backend","dhcp-server-backend","proxy-backend","content-filter-backend","suricata-backend","av-backend","cert-backend","vpn-servers-backend","ipsec-backend","gost-vpn-backend","agent-backend","user-backend","license-backend","backup-backend","cluster-backend","sysupdate-backend","mail-backend","vce-backend","central-console-backend","rest-api-backend","user-cabinet-backend","cfw-backend","shaper-backend","igmpproxy-backend","vpp-backend","logs-backend","servers-backend","l2-manager"],
-  etcd_indirect:["dns-backend","waf-backend","reverse-backend","ad-backend","ald-backend","audit-backend","netscan-backend","acl-backend"],
-  ch:["web","cabinet","monitor","reports","audit","logs","auth","suricata","waf","acl","nflog","vpp","flowexp","cc"],
-  sq:["ad","user","suricata"],
-  rk:["cf"],
-};
-
-var LIBS={
-  "system":["alerts","cluster","inet-access","license","vce","cert"],
-  "alias":["ad-users","alias","cluster","firewall","gost-vpn","inet-access","license","sessions","vce"],
-  "fw":["alerts","alias","cluster","firewall","gost-vpn","ipsec","l2manager","routing","system","vce","vpn-servers","suricata"],
-  "auth":["ad-users","agent","alerts","alias","auth","ipsec","license","sessions","system","vpn-servers","vpn-authd","vce"],
-  "web":["ad-users","alerts","alias","cert","system","vce","vpn-authd"],
-  "reports":["ad-users","alias","auth","cert","content-filter","license","reports","vce","av","cluster","firewall","l2manager","sessions","suricata","system"],
-  "monitor":["alerts","alias","l2manager","reports","sessions","suricata","system","vce","waf","cluster","inet-access","license"],
-  "routing":["agent","alerts","alias","cluster","gost-vpn","inet-access","ipsec","l2manager","routing","sessions","vce","vpn-servers"],
-  "dns":["ad-users","alerts","alias","l2manager","license","routing","sessions","vpn-servers"],
-  "dhcp":["alias","dhcp-server","l2manager","proxy","sessions","system","vce"],
-  "proxy":["ad-users","alerts","av","cert","content-filter","l2manager","proxy","system","vce"],
-  "cf":["alerts","cert","content-filter","inet-access","license","servers","vpp"],
-  "suricata":["alerts","alias","inet-access","l2manager","license","routing","sessions","suricata","vce"],
-  "av":["av","inet-access","license","vce","vpp"],
-  "waf":["reverse-backend","system","vce","waf"],
-  "reverse":["ad-users","agent","cert","l2manager","proxy","vce","alerts"],
-  "cert":["alerts","cert","l2manager","vce"],
-  "vpnsrv":["ad-users","agent","alerts","alias","cert","l2manager","sessions","routing","vce","vpn-authd","vpn-servers"],
-  "ipsec":["ad-users","alerts","alias","cert","firewall","ipsec","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],
-  "gostvpn":["alerts","alias","gost-vpn","cert","firewall"],
-  "agent":["ad-users","agent","auth","cert","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],
-  "user":["auth","license","sessions","system","ad-users","alias"],
-  "ad":["ad-users","alerts","alias","auth","system","vce"],
-  "ald":["alerts","alias","auth","vce"],
-  "audit":["system"],
-  "logs":["servers"],
-  "servers":["system"],
-  "license":["alerts","license","system","vce"],
-  "backup":["system"],
-  "cluster":["cluster","l2manager","license","system","vce"],
-  "sysupd":["license","system"],
-  "mail":["system"],
-  "vce":["system","vce"],
-  "cc":["system"],
-  "restapi":["alias","auth","system","vce"],
-  "cabinet":["system","vce"],
-  "cfw":["alias","firewall","vce"],
-  "shaper":["alias","firewall","vce"],
-  "netscan":["l2manager"],
-  "igmp":["alias","system","vce"],
-  "acl":["alias","firewall","vce"],
-  "vpp":["alias","cluster","vce","vpp"],
-  "l2":["alias","firewall","l2manager","system","vpp","cluster","vce"],
-};
-
-var LIB2ID={
-  "alias":"alias","auth":"auth","cert":"cert","cluster":"cluster","license":"license",
-  "vce":"vce","system":"system","firewall":"fw","routing":"routing","l2manager":"l2",
-  "proxy":"proxy","content-filter":"cf","av":"av","reports":"reports","monitor":"monitor",
-  "alerts":"monitor","inet-access":"auth","ad-users":"ad","sessions":"auth",
-  "vpn-servers":"vpnsrv","agent":"agent","ipsec":"ipsec","gost-vpn":"gostvpn",
-  "dhcp-server":"dhcp","suricata":"suricata","waf":"waf","servers":"servers",
-  "vpn-authd":"vpnauthd","web-authd":"webauthd","vpp":"vpp",
-};
-
-var DAEMONS=[
-  {id:"dm_strongswan",n:"strongSwan",sub:"IPSec/IKEv2",desc:"IPSec VPN daemon (charon). IKEv2, L2TP/IPSec, IPSec site-to-site туннели.",color:DM,relBackends:["vpnsrv","ipsec","gostvpn"]},
-  {id:"dm_unbound",n:"Unbound",sub:"DNS",desc:"DNS-резолвер/кэш/форвардер. Рекурсивный, DoH, локальные зоны.",color:DM,relBackends:["dns"]},
-  {id:"dm_dhcpd",n:"ISC DHCP",sub:"DHCP",desc:"DHCP-сервер. Пулы, резервирование, relay.",color:DM,relBackends:["dhcp"]},
-  {id:"dm_squid",n:"Squid",sub:"HTTP/S прокси",desc:"Прокси-сервер. TPROXY, SSL Bump, eCAP-модули.",color:DM,relBackends:["proxy"]},
-  {id:"dm_suricata",n:"Suricata",sub:"IPS",desc:"IPS-движок через NFQUEUE. ET Open/Pro, Snort.",color:DM,relBackends:["suricata"]},
-  {id:"dm_postfix",n:"Postfix",sub:"SMTP",desc:"Почтовый relay. DKIM, SPF.",color:DM,relBackends:["mail"]},
-  {id:"dm_nginx",n:"Nginx",sub:"Web/Reverse",desc:"Веб-сервер и reverse proxy. TLS, Let's Encrypt.",color:DM,relBackends:["web","reverse"]},
-  {id:"dm_keepalived",n:"keepalived",sub:"VRRP/HA",desc:"VRRP daemon для HA-кластера Active-Passive.",color:DM,relBackends:["cluster"]},
-  {id:"dm_frr",n:"FRRouting",sub:"BGP/OSPF",desc:"Демоны маршрутизации: zebra, bgpd, ospfd.",color:DM,relBackends:["routing"]},
-  {id:"dm_clamav",n:"ClamAV",sub:"Антивирус",desc:"clamd — антивирусный daemon. freshclam обновления.",color:DM,relBackends:["av"]},
-  {id:"dm_modsec",n:"ModSecurity",sub:"WAF",desc:"WAF-движок + OWASP CRS. SQL-инъекции, XSS.",color:DM,relBackends:["waf"]},
-  {id:"dm_wg",n:"WireGuard",sub:"VPN",desc:"Kernel VPN-модуль. Пиры, ключи.",color:DM,relBackends:["wg"]},
-  {id:"dm_vpp",n:"VPP (vpp_main)",sub:"Data Plane",desc:"Userspace сетевой стек fd.io + DPDK.",color:DM,relBackends:["vpp","acl"]},
-];
-
+const{useState,useRef,useCallback,useEffect,useMemo}=React;
+var O="#FF5A1A",Ob="#E77C06",BG="#100F26",CD="#1a1938",BD="#2d2856",TX="#E1EAF9",TM="#8b8aaa",TD="#5a5880";
+var O1="#FF5A1A",O2="#ff7a4a",O3="#ff9a6a",O4="#cc4815";
+var CE="#7ab8e0",CE2="#5a9aba",CC=O,CS="#b89ae0",CR="#e0a84a",DM="#4ecdc4";
+var LAYERS=[{id:"mgmt",label:"MANAGEMENT PLANE",desc:"UI, API, отчёты, журналы, аудит",color:O2},{id:"ctrl",label:"CONTROL PLANE",desc:"Файрвол, аутентификация, сеть, безопасность, VPN, маршрутизация",color:O3},{id:"data",label:"DATA PLANE",desc:"VPP/DPDK, eBPF, Suricata IPS, DPI, eCAP",color:O}];
+var LAYER_DESC={mgmt:"Management Plane — уровень управления и мониторинга.\n\nВеб-интерфейс (Nginx+aiohttp), личный кабинет, REST API (OpenAPI), мониторинг (Zabbix/SNMP), отчёты (ClickHouse), аудит.\n\nВсе компоненты работают через etcd и ClickHouse, НЕ обрабатывают трафик.",ctrl:"Control Plane — уровень конфигурации и политик.\n\nПаттерн: Management → etcd → validate → etcd PERMANENT/RUNTIME → daemon'ы watch.\n\nДомены: Аутентификация, МСЭ, Сеть, Безопасность, VPN, Маршрутизация.",data:"Data Plane — высокопроизводительная обработка трафика (C/C++).\n\n1) VPP/DPDK → 2) eBPF ACL (XDP) → 3) VPP graph → 4) Suricata IPS → 5) eCAP Squid → 6) DPI L7 (nDPI)\n\nКонфигурация из etcd RUNTIME, события → ClickHouse.",infra:"Infrastructure — фундамент: ядро, лицензии, бэкапы, обновления, VCE, HA.\n\nХранилища: etcd PERMANENT (настройки), etcd RUNTIME (оперативные), ClickHouse, SQLite, RocksDB.",daemon:"System Daemons — процессы ОС.\n\nstrongSwan, Unbound, Squid, Suricata, Postfix, Nginx, keepalived, FRRouting, ClamAV, ModSecurity, WireGuard, VPP."};
+var DOMS={ui:{l:"Веб-интерфейс",ly:"mgmt",c:O2},rpt:{l:"Отчёты и журналы",ly:"mgmt",c:O3},api_d:{l:"API и мониторинг",ly:"mgmt",c:O1},auth_c:{l:"Аутентификация",ly:"ctrl",c:O2},fw_c:{l:"Файрвол и объекты",ly:"ctrl",c:O},net_c:{l:"Сетевые сервисы",ly:"ctrl",c:O3},sec_c:{l:"Безопасность",ly:"ctrl",c:Ob},vpn_c:{l:"VPN и туннели",ly:"ctrl",c:O4},rt_c:{l:"Маршрутизация",ly:"ctrl",c:O2},acl_d:{l:"Фильтрация",ly:"data",c:O},px_d:{l:"Прокси и DPI",ly:"data",c:Ob},vpp_d:{l:"VPP / сеть",ly:"data",c:O4},st_d:{l:"Статистика",ly:"data",c:O2},sys_i:{l:"Ядро и управление",ly:"infra",c:O3},ha_i:{l:"Кластер и HA",ly:"infra",c:O2},db_i:{l:"Хранилища",ly:"infra",c:TM}};
+var DOM_DESC={ui:"Веб-интерфейс администратора и личный кабинет.",rpt:"Отчёты, журналы, аудит.",api_d:"REST API и мониторинг.",auth_c:"AD, ALD Pro, RADIUS, SSO, 2FA.",fw_c:"МСЭ, объекты, QoS.",net_c:"DNS, DHCP, L2, IGMP.",sec_c:"CF, IPS, AV, WAF, прокси, PKI.",vpn_c:"VPN, IPSec, ГОСТ, WireGuard.",rt_c:"FRRouting.",acl_d:"ACL, eBPF, NFLOG.",px_d:"eCAP, DPI L7.",vpp_d:"VPP/DPDK.",st_d:"DPI-статистика, conntrack.",sys_i:"Ядро, лицензии, бэкапы, VCE.",ha_i:"HA Active-Passive.",db_i:"etcd, ClickHouse, SQLite, RocksDB."};
+var DB_PERM=["system","alias","fw","auth","web","reports","monitor","routing","dns","dhcp","proxy","cf","suricata","av","waf","reverse","cert","vpnsrv","ipsec","gostvpn","agent","user","ad","ald","audit","license","backup","cluster","sysupd","mail","vce","cc","restapi","cabinet","cfw","shaper","netscan","igmp","acl","vpp","l2","logs","servers","wg"];
+var DB_RUN=["vpp","l2","acl","cluster","auth","system","monitor","fw","routing","dhcp","dns","suricata","proxy","vpnsrv","ipsec","cf"];
+var DB_CH=["web","cabinet","monitor","reports","audit","logs","auth","suricata","waf","acl","nflog","vpp","flowexp","cc"];
+var DB_SQ=["ad","user","suricata"];
+var DB_RK=["cf"];
+var LINK_DESC={"alias":"Объекты (IP-группы, сервисы, расписания, зоны)","auth":"Аутентификация, проверка прав","cert":"Сертификаты (CA, SSL Bump, VPN)","cluster":"Состояние кластера, синхронизация","license":"Лицензии и лимиты модулей","vce":"Контекст VCE (изолированные инстансы)","system":"Системные параметры (hostname, TZ, NTP)","firewall":"Правила МСЭ (FORWARD/INPUT/DNAT/SNAT)","routing":"Маршруты (static, PBR, BGP, OSPF)","l2manager":"Интерфейсы (Ethernet, VLAN, Bond, Bridge, KNI)","proxy":"Настройки прокси (TPROXY, SSL Bump, eCAP)","content-filter":"Категории URL, белые/чёрные списки","av":"Настройки антивируса (ClamAV/Kaspersky)","reports":"Параметры отчётов, шаблоны","alerts":"Оповещения (IPS, каналы, диск)","inet-access":"Права доступа в интернет","ad-users":"Пользователи/группы из AD/ALD","sessions":"Активные сессии (IP ↔ user)","vpn-servers":"VPN-серверы (IKEv2/L2TP/SSTP/WG/OVPN)","agent":"Профили Ideco Client","ipsec":"IPSec-туннели (SA, DPD, PFS)","gost-vpn":"ГОСТ VPN туннели","dhcp-server":"DHCP-пулы, резервирования","suricata":"Правила IPS, профили","waf":"Правила WAF (ModSecurity CRS)","servers":"Внешние серверы (Syslog, NTP, DNS)","vpn-authd":"Аутентификация VPN-клиентов","vpp":"Конфигурация VPP (интерфейсы, ACL)"};
+var DB_LINK_DESC={"db_perm":"Конфигурация (правила, настройки, объекты) — постоянное хранение","db_run":"Оперативные данные (состояние интерфейсов, сессии, статусы)","db_ch":"Логи, метрики, алерты, статистика трафика","db_sq":"Кэш AD, локальные учётки, правила IPS","db_rk":"URL-категории контент-фильтра (145 категорий)"};
+var LIBS={"system":["alerts","cluster","inet-access","license","vce","cert"],"alias":["ad-users","alias","cluster","firewall","gost-vpn","inet-access","license","sessions","vce"],"fw":["alerts","alias","cluster","firewall","gost-vpn","ipsec","l2manager","routing","system","vce","vpn-servers","suricata"],"auth":["ad-users","agent","alerts","alias","auth","ipsec","license","sessions","system","vpn-servers","vpn-authd","vce"],"web":["ad-users","alerts","alias","cert","system","vce","vpn-authd"],"reports":["ad-users","alias","auth","cert","content-filter","license","reports","vce","av","cluster","firewall","l2manager","sessions","suricata","system"],"monitor":["alerts","alias","l2manager","reports","sessions","suricata","system","vce","waf","cluster","inet-access","license"],"routing":["agent","alerts","alias","cluster","gost-vpn","inet-access","ipsec","l2manager","routing","sessions","vce","vpn-servers"],"dns":["ad-users","alerts","alias","l2manager","license","routing","sessions","vpn-servers"],"dhcp":["alias","dhcp-server","l2manager","proxy","sessions","system","vce"],"proxy":["ad-users","alerts","av","cert","content-filter","l2manager","proxy","system","vce"],"cf":["alerts","cert","content-filter","inet-access","license","servers","vpp"],"suricata":["alerts","alias","inet-access","l2manager","license","routing","sessions","suricata","vce"],"av":["av","inet-access","license","vce","vpp"],"waf":["reverse-backend","system","vce","waf"],"reverse":["ad-users","agent","cert","l2manager","proxy","vce","alerts"],"cert":["alerts","cert","l2manager","vce"],"vpnsrv":["ad-users","agent","alerts","alias","cert","l2manager","sessions","routing","vce","vpn-authd","vpn-servers"],"ipsec":["ad-users","alerts","alias","cert","firewall","ipsec","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"gostvpn":["alerts","alias","gost-vpn","cert","firewall"],"agent":["ad-users","agent","auth","cert","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"user":["auth","license","sessions","system","ad-users","alias"],"ad":["ad-users","alerts","alias","auth","system","vce"],"ald":["alerts","alias","auth","vce"],"audit":["system"],"logs":["servers"],"servers":["system"],"license":["alerts","license","system","vce"],"backup":["system"],"cluster":["cluster","l2manager","license","system","vce"],"sysupd":["license","system"],"mail":["system"],"vce":["system","vce"],"cc":["system"],"restapi":["alias","auth","system","vce"],"cabinet":["system","vce"],"cfw":["alias","firewall","vce"],"shaper":["alias","firewall","vce"],"netscan":["l2manager"],"igmp":["alias","system","vce"],"acl":["alias","firewall","vce"],"vpp":["alias","cluster","vce","vpp"],"l2":["alias","firewall","l2manager","system","vpp","cluster","vce"]};
+var LIB2ID={"alias":"alias","auth":"auth","cert":"cert","cluster":"cluster","license":"license","vce":"vce","system":"system","firewall":"fw","routing":"routing","l2manager":"l2","proxy":"proxy","content-filter":"cf","av":"av","reports":"reports","monitor":"monitor","alerts":"monitor","inet-access":"auth","ad-users":"ad","sessions":"auth","vpn-servers":"vpnsrv","agent":"agent","ipsec":"ipsec","gost-vpn":"gostvpn","dhcp-server":"dhcp","suricata":"suricata","waf":"waf","servers":"servers","vpn-authd":"vpnauthd","web-authd":"webauthd","vpp":"vpp"};
+var DAEMONS=[{id:"dm_strongswan",n:"strongSwan",sub:"IPSec/IKEv2",desc:"IPSec VPN daemon (charon).",color:DM,rb:["vpnsrv","ipsec","gostvpn"]},{id:"dm_unbound",n:"Unbound",sub:"DNS",desc:"DNS-резолвер/кэш.",color:DM,rb:["dns"]},{id:"dm_dhcpd",n:"ISC DHCP",sub:"DHCP",desc:"DHCP-сервер.",color:DM,rb:["dhcp"]},{id:"dm_squid",n:"Squid",sub:"HTTP/S прокси",desc:"Прокси. TPROXY, SSL Bump, eCAP.",color:DM,rb:["proxy"]},{id:"dm_suricata",n:"Suricata",sub:"IPS",desc:"IPS через NFQUEUE.",color:DM,rb:["suricata"]},{id:"dm_postfix",n:"Postfix",sub:"SMTP",desc:"Почтовый relay.",color:DM,rb:["mail"]},{id:"dm_nginx",n:"Nginx",sub:"Web/Reverse",desc:"Веб-сервер, reverse proxy.",color:DM,rb:["web","reverse"]},{id:"dm_keepalived",n:"keepalived",sub:"VRRP/HA",desc:"VRRP для HA-кластера.",color:DM,rb:["cluster"]},{id:"dm_frr",n:"FRRouting",sub:"BGP/OSPF",desc:"zebra, bgpd, ospfd.",color:DM,rb:["routing"]},{id:"dm_clamav",n:"ClamAV",sub:"Антивирус",desc:"clamd + freshclam.",color:DM,rb:["av"]},{id:"dm_modsec",n:"ModSecurity",sub:"WAF",desc:"WAF + OWASP CRS.",color:DM,rb:["waf"]},{id:"dm_wg",n:"WireGuard",sub:"VPN",desc:"Kernel VPN-модуль.",color:DM,rb:["wg"]},{id:"dm_vpp",n:"VPP (vpp_main)",sub:"Data Plane",desc:"fd.io + DPDK.",color:DM,rb:["vpp","acl"]}];
 var C=[
-  {id:"web",n:"web-backend",s:"Веб-интерфейс",dom:"ui",desc:"Веб-интерфейс администратора. Nginx + aiohttp, 2FA, Telegram-бот, роли администраторов.",lang:"Python",fw:"aiohttp, nginx",det:["Nginx reverse-proxy + aiohttp async","2FA: TOTP, SMS Aero, Multifactor","Telegram-бот уведомлений","Роли: суперадмин, МСЭ, ИБ, аудитор","Управление сессиями"]},
-  {id:"cabinet",n:"user-cabinet-backend",s:"Личный кабинет",dom:"ui",desc:"Портал самообслуживания. Смена пароля, статистика, VPN-профили.",lang:"Python",fw:"aiohttp",det:["Смена пароля","Статистика трафика","SSL VPN портал","VPN-профили"]},
-  {id:"restapi",n:"rest-api-backend",s:"REST API (OpenAPI)",dom:"api_d",desc:"Внешний REST API. OpenAPI. SIEM/SOAR интеграция.",lang:"Python",fw:"aiohttp",det:["OpenAPI","Правила МСЭ","SIEM/SOAR","Пользователи, VPN"]},
-  {id:"monitor",n:"monitor-backend",s:"Мониторинг",dom:"api_d",desc:"Метрики CPU/RAM/диск/сеть → ClickHouse. Zabbix, SNMP.",lang:"Python",fw:"aiohttp",det:["Метрики → ClickHouse","Zabbix, SNMP","Репутация IP","Healthcheck"]},
-  {id:"reports",n:"reports-backend",s:"Движок отчётов",dom:"rpt",desc:"Агрегация ClickHouse → графики, CSV/PDF. Конструктор отчётов.",lang:"Python",fw:"aiohttp, clickhouse-driver",det:["Конструктор отчётов","Журналы: МСЭ, веб, трафик","CSV/PDF, email","Materialized Views"]},
-  {id:"audit",n:"audit-backend",s:"Аудит",dom:"rpt",desc:"Журнал действий администраторов → ClickHouse.",lang:"Python",fw:"aiohttp",det:["Входы/выходы с IP","Изменения настроек","Фиксация по ролям"]},
-  {id:"logs",n:"logs-backend",s:"Журналирование",dom:"rpt",desc:"journald → Syslog (RFC 5424) → ClickHouse.",lang:"Python",fw:"aiohttp",det:["TCP/UDP syslog","Ротация","→ ClickHouse"]},
-  {id:"servers",n:"servers-backend",s:"Внешние серверы",dom:"rpt",desc:"Syslog/NTP/DNS upstream серверы.",lang:"Python",fw:"aiohttp",det:["Syslog-серверы","NTP, DNS upstream"]},
-  {id:"auth",n:"auth-backend",s:"Центр аутентификации",dom:"auth_c",desc:"Captive portal, Kerberos SSO, NTLM, RADIUS, 2FA.",lang:"Python",fw:"aiohttp",det:["Captive portal","Kerberos SSO, NTLM","RADIUS, IP-авторизация","2FA"]},
-  {id:"ad",n:"ad-backend",s:"Active Directory",dom:"auth_c",desc:"Импорт AD по LDAP. Kerberos SSO, NTLM. Кэш SQLite.",lang:"Python",fw:"aiohttp, ldap3",det:["LDAP-импорт","Kerberos SSO, NTLM","Кэш SQLite","Мульти-домен"]},
-  {id:"ald",n:"ald-backend",s:"ALD Pro / FreeIPA",dom:"auth_c",desc:"ALD Pro и FreeIPA. SSO Kerberos.",lang:"Python",fw:"aiohttp",det:["Импорт учёток","Kerberos SSO"]},
-  {id:"user",n:"user-backend",s:"Пользователи",dom:"auth_c",desc:"Локальные учётки, группы, квоты. SQLite.",lang:"Python",fw:"aiohttp",det:["Учётные записи","Группы, квоты","SQLite"]},
-  {id:"webauthd",n:"web-authd",s:"Captive Portal",dom:"auth_c",desc:"Перехват HTTP, страница входа, SSO.",lang:"Python",fw:"aiohttp",det:["HTTP-перехват","Страница входа","SSO"]},
-  {id:"vpnauthd",n:"vpn-authd",s:"VPN-аутентификация",dom:"auth_c",desc:"Проверка VPN-клиентов.",lang:"Python",fw:"daemon",det:["IKEv2, L2TP, SSTP","WireGuard, OpenVPN"]},
-  {id:"fw",n:"firewall-backend",s:"Межсетевой экран",dom:"fw_c",desc:"FORWARD/INPUT/DNAT/SNAT. Stateful. Объекты alias. Профили IPS/DPI/AV/CF.",lang:"Python",fw:"aiohttp, nftables",det:["FORWARD, INPUT, DNAT, SNAT","Stateful","Объекты alias","Профили IPS/DPI/AV/CF"]},
-  {id:"cfw",n:"cfw-backend",s:"Custom Firewall",dom:"fw_c",desc:"Пользовательские nftables. Pre-filter.",lang:"Python",fw:"aiohttp, nftables",det:["Pre-filter","nftables"]},
-  {id:"alias",n:"alias-backend",s:"Объекты (38+ модулей)",dom:"fw_c",desc:"IP-группы, подсети, сервисы, расписания, зоны, алиасы AD/ALD.",lang:"Python",fw:"aiohttp",det:["IP-группы","Сервисы, расписания","Зоны","Алиасы AD/ALD"]},
-  {id:"shaper",n:"shaper-backend",s:"QoS / шейпер",dom:"fw_c",desc:"Ограничение скорости (tc).",lang:"Python",fw:"aiohttp, tc",det:["По пользователям/IP","Traffic Control"]},
-  {id:"l2",n:"l2-manager",s:"L2 / интерфейсы",dom:"net_c",desc:"Ethernet, VLAN, Bond, Bridge. KNI для VPP.",lang:"Python",fw:"aiohttp, pyroute2",det:["Ethernet, VLAN, Bond, Bridge","etcd RUNTIME от VPP","KNI-интерфейсы"]},
-  {id:"dns",n:"dns-backend",s:"DNS (Unbound)",dom:"net_c",desc:"DNS-сервер/прокси. Кэш, DoH, зоны.",lang:"Python",fw:"aiohttp, Unbound",det:["Кэширование, DoH","Пользовательские зоны","DNS-логирование"]},
-  {id:"dhcp",n:"dhcp-server-backend",s:"DHCP",dom:"net_c",desc:"DHCP-сервер: пулы, резервирование, relay.",lang:"Python",fw:"aiohttp, ISC DHCP",det:["Пулы","Резервирование","DHCP relay"]},
-  {id:"netscan",n:"netscan-backend",s:"Сканер сети",dom:"net_c",desc:"ARP-сканирование, fingerprinting.",lang:"Python",fw:"aiohttp, scapy",det:["ARP-сканирование","Fingerprinting"]},
-  {id:"igmp",n:"igmpproxy-backend",s:"IGMP Proxy",dom:"net_c",desc:"Мультикаст (IPTV).",lang:"Python",fw:"aiohttp",det:["IGMP проксирование","IPTV"]},
-  {id:"cf",n:"content-filter-backend",s:"Контент-фильтр",dom:"sec_c",desc:"145 категорий URL в RocksDB. Safe Search.",lang:"Python",fw:"aiohttp, RocksDB",det:["145 категорий","RocksDB","Safe Search","White/black списки"]},
-  {id:"suricata",n:"suricata-backend",s:"IPS (Suricata)",dom:"sec_c",desc:"IPS через NFQUEUE. ET Open/Pro, Snort.",lang:"Python",fw:"aiohttp, Suricata",det:["NFQUEUE","ET Open/Pro, Snort","→ ClickHouse, SQLite"]},
-  {id:"av",n:"av-backend",s:"Антивирус",dom:"sec_c",desc:"ClamAV, Kaspersky. ecap-av в Squid.",lang:"Python",fw:"aiohttp",det:["ClamAV","Kaspersky","ecap-av"]},
-  {id:"waf",n:"waf-backend",s:"WAF",dom:"sec_c",desc:"ModSecurity + OWASP CRS.",lang:"Python",fw:"aiohttp, ModSecurity",det:["ModSecurity + OWASP CRS","SQL-инъекции, XSS","→ ClickHouse"]},
-  {id:"proxy",n:"proxy-backend",s:"Прокси (Squid)",dom:"sec_c",desc:"HTTP/HTTPS прокси. TPROXY, SSL Bump, eCAP.",lang:"Python",fw:"aiohttp, Squid",det:["TPROXY","SSL Bump","eCAP: AV, URL, морф"]},
-  {id:"reverse",n:"reverse-backend",s:"Обратный прокси",dom:"sec_c",desc:"Публикация ресурсов. TLS, Let's Encrypt, WAF.",lang:"Python",fw:"aiohttp, nginx",det:["TLS-терминация","Let's Encrypt","WAF"]},
-  {id:"cert",n:"cert-backend",s:"PKI / Сертификаты",dom:"sec_c",desc:"CA, CRL, OCSP. SSL Bump, VPN сертификаты.",lang:"Python",fw:"aiohttp, OpenSSL",det:["CA, CRL, OCSP","SSL Bump","VPN certs"]},
-  {id:"vpnsrv",n:"vpn-servers-backend",s:"VPN-серверы",dom:"vpn_c",desc:"IKEv2, L2TP, SSTP, WG, OVPN.",lang:"Python",fw:"aiohttp, strongSwan",det:["IKEv2, L2TP, SSTP","WG, OVPN","Авто-профили"]},
-  {id:"ipsec",n:"ipsec-backend",s:"IPSec site-to-site",dom:"vpn_c",desc:"IKEv1/IKEv2 туннели.",lang:"Python",fw:"aiohttp, strongSwan",det:["IKEv1/IKEv2","SA, DPD, PFS"]},
-  {id:"gostvpn",n:"gost-vpn-backend",s:"ГОСТ VPN",dom:"vpn_c",desc:"ГОСТ Р 34.12-2015.",lang:"Python",fw:"aiohttp",det:["Кузнечик/Магма","КИИ, госорганы"]},
-  {id:"agent",n:"agent-backend",s:"Ideco Client",dom:"vpn_c",desc:"Авто-конфигурация VPN-клиента.",lang:"Python",fw:"aiohttp",det:["Push профилей","Win, macOS, Linux, Android, iOS"]},
-  {id:"wg",n:"wireguard-backend",s:"WireGuard",dom:"vpn_c",desc:"Пиры, ключи, маршруты.",lang:"Python",fw:"aiohttp, wg-tools",det:["Peers, ключи"]},
-  {id:"routing",n:"routing-backend",s:"Маршрутизация (FRR)",dom:"rt_c",desc:"Static, PBR, BGP, OSPF, балансировка, failover.",lang:"Python",fw:"aiohttp, FRRouting",det:["Static, PBR","BGP, OSPF","Балансировка, failover"]},
-  {id:"acl",n:"acl-backend",s:"ACL трансляция",dom:"acl_d",desc:"Правила МСЭ → eBPF/VPP ACL.",lang:"Python",fw:"aiohttp, eBPF",det:["Watch firewall + alias","eBPF ACL","→ ClickHouse"]},
-  {id:"bpf",n:"bpf-acl-rules",s:"eBPF (XDP)",dom:"acl_d",desc:"Фильтрация до сетевого стека.",lang:"C (eBPF)",fw:"XDP, libbpf",det:["XDP","Аппаратная фильтрация"]},
-  {id:"nflog",n:"ideco-nflog",s:"NFLOG → CH",dom:"acl_d",desc:"Захват accept/drop → ClickHouse.",lang:"C",fw:"libnetfilter_log",det:["accept/drop","raw_traffic_journal"]},
-  {id:"vpp",n:"vpp-backend",s:"VPP / DPDK",dom:"vpp_d",desc:"Ядро data plane (fd.io). DPDK PMD, AF_XDP, KNI.",lang:"Python+C",fw:"fd.io VPP, DPDK",det:["DPDK PMD / AF_XDP","KNI, L2-бриджи","etcd RUNTIME","→ ClickHouse"]},
-  {id:"ecap_av",n:"ecap-av",s:"eCAP: антивирус",dom:"px_d",desc:"AV-проверка HTTP в Squid.",lang:"C++",fw:"libecap",det:["ClamAV/Kaspersky","Unix socket"]},
-  {id:"ecap_urls",n:"ecap-urls",s:"eCAP: URL-фильтр",dom:"px_d",desc:"URL по RocksDB.",lang:"C++",fw:"libecap, RocksDB",det:["145 категорий","C++ скорость"]},
-  {id:"appctrl",n:"app-control-nfq",s:"DPI (L7)",dom:"px_d",desc:"NFQUEUE DPI.",lang:"C++",fw:"NFQUEUE, nDPI",det:["Telegram, YouTube, BitTorrent","→ flow-stat-server"]},
-  {id:"flowsrv",n:"flow-stat-server",s:"DPI-приём",dom:"st_d",desc:"Приёмник DPI-статистики.",lang:"C",fw:"custom",det:["Агрегация"]},
-  {id:"flowexp",n:"flow-stat-exporter",s:"DPI → CH",dom:"st_d",desc:"Экспорт DPI → ClickHouse.",lang:"C++",fw:"clickhouse-cpp",det:["Batch-вставка"]},
-  {id:"trafmond",n:"trafmond",s:"Монитор трафика",dom:"st_d",desc:"Conntrack, DNS-кэш.",lang:"Python",fw:"pyroute2",det:["Conntrack","DNS-кэш"]},
-  {id:"system",n:"system-backend",s:"Ядро системы",dom:"sys_i",desc:"Hostname, NTP, TZ, CPU/RAM, веб-терминал, reboot, администраторы, GeoIP.",lang:"Python",fw:"aiohttp",det:["Hostname, TZ","NTP, веб-терминал","CPU/RAM/диски","Reboot/shutdown","Администраторы","GeoIP"]},
-  {id:"license",n:"license-backend",s:"Лицензии",dom:"sys_i",desc:"Активация, подписки, лимиты.",lang:"Python",fw:"aiohttp",det:["Ключи, подписки","Лимиты"]},
-  {id:"backup",n:"backup-backend",s:"Бэкапы",dom:"sys_i",desc:"Резервное копирование.",lang:"Python",fw:"aiohttp",det:["Бэкап/восстановление","Откат версии"]},
-  {id:"sysupd",n:"sysupdate-backend",s:"Обновления",dom:"sys_i",desc:"ОС, ядро, IPS/AV/CF/GeoIP.",lang:"Python",fw:"aiohttp, rpm",det:["ОС, ядро","Базы IPS/AV/CF","GeoIP"]},
-  {id:"mail",n:"mail-backend",s:"Почтовый релей",dom:"sys_i",desc:"SMTP relay, DKIM.",lang:"Python",fw:"aiohttp, Postfix",det:["SMTP relay","DKIM, SPF"]},
-  {id:"vce",n:"vce-backend",s:"VCE",dom:"sys_i",desc:"Виртуальные контексты NGFW.",lang:"Python",fw:"aiohttp",det:["Изолированные инстансы","Classic / high-perf"]},
-  {id:"cc",n:"central-console",s:"Ideco Center",dom:"sys_i",desc:"Централизованное управление.",lang:"Python",fw:"aiohttp",det:["Единая консоль","Синхронизация политик"]},
-  {id:"cluster",n:"cluster-backend",s:"Кластер HA",dom:"ha_i",desc:"Active-Passive, VRRP, синхронизация.",lang:"Python",fw:"aiohttp, keepalived",det:["Синхронизация","VRRP","Авто-переключение"]},
+{id:"web",n:"web-backend",s:"Веб-интерфейс",dom:"ui",sk:"both",desc:"Nginx+aiohttp. Роли: суперадмин/МСЭ/ИБ/аудитор. 2FA (TOTP/SMS/Multifactor). Telegram-бот. Управление сессиями.",lang:"Python",fw:"aiohttp, nginx",det:["Nginx + aiohttp","2FA: TOTP, SMS, Multifactor","Telegram-бот","Роли администраторов","Управление сессиями"]},
+{id:"cabinet",n:"user-cabinet-backend",s:"Личный кабинет",dom:"ui",sk:"both",desc:"Портал пользователей. Смена пароля, статистика трафика, SSL VPN портал, скачивание VPN-профилей (.ovpn/.conf).",lang:"Python",fw:"aiohttp",det:["Смена пароля","Статистика трафика","SSL VPN портал","VPN-профили"]},
+{id:"restapi",n:"rest-api-backend",s:"REST API (OpenAPI)",dom:"api_d",sk:"both",desc:"OpenAPI. CRUD правил МСЭ, пользователи, VPN, объекты. SIEM/SOAR интеграция. DevOps/IaC (Terraform/Ansible). API-ключи, rate limiting.",lang:"Python",fw:"aiohttp",det:["OpenAPI","SIEM/SOAR","DevOps/IaC","API-ключи"]},
+{id:"monitor",n:"monitor-backend",s:"Мониторинг",dom:"api_d",sk:"both",desc:"CPU/RAM/диск/сеть → ClickHouse (30с). Zabbix-agent, SNMP v2c/v3. Healthcheck бэкендов (10с). Репутация IP/доменов (облако Ideco). alerts-lib.",lang:"Python",fw:"aiohttp",det:["Метрики → ClickHouse","Zabbix/SNMP","Healthcheck (10с)","Репутация IP","alerts-lib"]},
+{id:"reports",n:"reports-backend",s:"Движок отчётов",dom:"rpt",sk:"both",desc:"Конструктор отчётов: МСЭ/веб/IPS/DPI. ClickHouse Materialized Views (<1с). CSV/PDF. Email-рассылка (cron). 15+ lib-зависимостей.",lang:"Python",fw:"aiohttp, clickhouse-driver",det:["Конструктор отчётов","Materialized Views","CSV/PDF","Email (cron)","15+ lib"]},
+{id:"audit",n:"audit-backend",s:"Аудит",dom:"rpt",sk:"both",desc:"Журнал действий: входы/выходы+GeoIP, diff настроек (JSON). ClickHouse (TTL 365д). ФСТЭК/ФСБ compliance.",lang:"Python",fw:"aiohttp",det:["Входы + GeoIP","Diff (JSON)","TTL 365д","ФСТЭК/ФСБ"]},
+{id:"logs",n:"logs-backend",s:"Журналирование",dom:"rpt",sk:"both",desc:"journald → Syslog RFC 5424 → ClickHouse. TCP/UDP syslog (CEF для SIEM). Ротация. LZ4 сжатие.",lang:"Python",fw:"aiohttp",det:["Syslog RFC 5424","TCP/UDP (CEF)","Ротация","LZ4"]},
+{id:"servers",n:"servers-backend",s:"Внешние серверы",dom:"rpt",sk:"both",desc:"Syslog-серверы (TCP/UDP, CEF), NTP, DNS upstream/DoH. servers-lib для других бэкендов.",lang:"Python",fw:"aiohttp",det:["Syslog","NTP","DNS upstream"]},
+{id:"auth",n:"auth-backend",s:"Центр аутентификации",dom:"auth_c",sk:"both",desc:"Captive portal, Kerberos SSO, NTLM, RADIUS, IP-авторизация, 2FA. sessions-lib (IP↔user). inet-access-lib. 12 lib-зависимостей.",lang:"Python",fw:"aiohttp",det:["Captive portal","Kerberos/NTLM","RADIUS","2FA","sessions-lib","12 lib"]},
+{id:"ad",n:"ad-backend",s:"Active Directory",dom:"auth_c",sk:"both",desc:"LDAP/LDAPS (мульти-домен). Инкрементальная синхронизация (USN). Kerberos SSO (keytab/SPN). NTLM (winbind). SQLite кэш (offline). Cron+watch.",lang:"Python",fw:"aiohttp, ldap3",det:["LDAP мульти-домен","Kerberos/NTLM","SQLite кэш","Cron+watch"]},
+{id:"ald",n:"ald-backend",s:"ALD Pro / FreeIPA",dom:"auth_c",sk:"both",desc:"ALD Pro / FreeIPA. LDAP импорт, Kerberos SSO. Astra/ALT Linux. Импортозамещение.",lang:"Python",fw:"aiohttp",det:["ALD Pro/FreeIPA","Kerberos SSO","Импортозамещение"]},
+{id:"user",n:"user-backend",s:"Пользователи",dom:"auth_c",sk:"both",desc:"Локальные учётки (не AD). CRUD, группы, квоты трафика. SQLite (bcrypt). Импорт CSV.",lang:"Python",fw:"aiohttp",det:["CRUD","Квоты","SQLite (bcrypt)","CSV импорт"]},
+{id:"webauthd",n:"web-authd",s:"Captive Portal",dom:"auth_c",sk:"classic",desc:"HTTP-перехват (iptables REDIRECT). 302→captive portal. Создание сессии. Classic-стек only.",lang:"Python",fw:"aiohttp",det:["iptables REDIRECT","302 redirect","Classic only"]},
+{id:"vpnauthd",n:"vpn-authd",s:"VPN-аутентификация",dom:"auth_c",sk:"both",desc:"strongSwan xauth/eap plugin. OpenVPN auth-user-pass-verify. Проверка через auth-backend. 2FA. Возврат IP+маршруты.",lang:"Python",fw:"daemon",det:["xauth/eap","OVPN verify","2FA","IP+маршруты"]},
+{id:"fw",n:"firewall-backend",s:"Межсетевой экран",dom:"fw_c",sk:"both",desc:"FORWARD/INPUT/DNAT/SNAT. Stateful (conntrack). Профили IPS/DPI/AV/CF. Объекты alias. → etcd → acl → eBPF/VPP. accept/drop → ClickHouse. 12 lib.",lang:"Python",fw:"aiohttp, nftables",det:["FORWARD/INPUT/DNAT/SNAT","Stateful","Профили IPS/DPI/AV/CF","→ acl → eBPF/VPP","12 lib"]},
+{id:"cfw",n:"cfw-backend",s:"Custom Firewall",dom:"fw_c",sk:"classic",desc:"Pre-filter nftables. GeoIP блокировка до МСЭ. Classic-стек only.",lang:"Python",fw:"aiohttp, nftables",det:["Pre-filter","nftables","GeoIP","Classic only"]},
+{id:"alias",n:"alias-backend",s:"Объекты (38+ модулей)",dom:"fw_c",sk:"both",desc:"38+ модулей: IP/MAC/FQDN/сервисы/расписания/зоны/алиасы AD. Переиспользование во всех правилах. alias-lib: 30+ потребителей. 9 lib.",lang:"Python",fw:"aiohttp",det:["38+ модулей","IP/MAC/FQDN/сервисы","Зоны безопасности","alias-lib: 30+","9 lib"]},
+{id:"shaper",n:"shaper-backend",s:"QoS / шейпер",dom:"fw_c",sk:"classic",desc:"Linux tc (HTB/HFSC). rate/ceil/prio. По пользователям/группам/IP. Classic-стек only.",lang:"Python",fw:"aiohttp, tc",det:["tc HTB/HFSC","rate/ceil/prio","Classic only"]},
+{id:"l2",n:"l2-manager",s:"L2 / интерфейсы",dom:"net_c",sk:"both",desc:"Ethernet/VLAN/Bond/Bridge. KNI (VPP↔Linux). etcd RUNTIME (link state). pyroute2/Netlink. 7 lib.",lang:"Python",fw:"aiohttp, pyroute2",det:["Ethernet/VLAN/Bond/Bridge","KNI","etcd RUNTIME","pyroute2","7 lib"]},
+{id:"dns",n:"dns-backend",s:"DNS (Unbound)",dom:"net_c",sk:"both",desc:"Рекурсивный/форвардер/авторитативный. Кэш+prefetch. DoH. DNSSEC. Зоны A/AAAA/CNAME/MX/TXT/SRV. DNS→ClickHouse. RPZ. 8 lib.",lang:"Python",fw:"aiohttp, Unbound",det:["Рекурсив/форвардер","DoH/DNSSEC","DNS→ClickHouse","RPZ","8 lib"]},
+{id:"dhcp",n:"dhcp-server-backend",s:"DHCP",dom:"net_c",sk:"both",desc:"ISC DHCP. Пулы/VLAN, резервирование MAC, relay, Dynamic DNS, PXE. Lease-файлы в UI. 6 lib.",lang:"Python",fw:"aiohttp, ISC DHCP",det:["Пулы/VLAN","MAC резерв","relay/DDNS","PXE","6 lib"]},
+{id:"netscan",n:"netscan-backend",s:"Сканер сети",dom:"net_c",sk:"both",desc:"ARP-сканирование. OS Fingerprinting (TTL/TCP). MAC OUI. Scapy.",lang:"Python",fw:"aiohttp, scapy",det:["ARP-скан","Fingerprinting","MAC OUI"]},
+{id:"igmp",n:"igmpproxy-backend",s:"IGMP Proxy",dom:"net_c",sk:"classic",desc:"IPTV мультикаст. upstream/downstream. Classic-стек only.",lang:"Python",fw:"aiohttp",det:["IGMP","IPTV","Classic only"]},
+{id:"cf",n:"content-filter-backend",s:"Контент-фильтр",dom:"sec_c",sk:"both",desc:"145 категорий URL (RocksDB bitmap). Облако Ideco (~100K/день). Safe Search. Морфоанализ (eCAP). Профили по пользователям. 7 lib.",lang:"Python",fw:"aiohttp, RocksDB",det:["145 категорий","RocksDB","Safe Search","Морфоанализ","7 lib"]},
+{id:"suricata",n:"suricata-backend",s:"IPS (Suricata)",dom:"sec_c",sk:"both",desc:"NFQUEUE inline. ET Open (40K+)/ET Pro (60K+)/Snort. Алерты→ClickHouse. IPS-профили в МСЭ. SQLite (custom). 9 lib.",lang:"Python",fw:"aiohttp, Suricata",det:["NFQUEUE","ET Open/Pro/Snort","Алерты→CH","IPS-профили","9 lib"]},
+{id:"av",n:"av-backend",s:"Антивирус",dom:"sec_c",sk:"both",desc:"ClamAV (clamd/freshclam) + Kaspersky (KLMS/KSMG). eCAP ecap-av (Unix socket). PE/ELF/архивы/документы. 5 lib.",lang:"Python",fw:"aiohttp",det:["ClamAV/Kaspersky","eCAP ecap-av","PE/ELF/архивы","5 lib"]},
+{id:"waf",n:"waf-backend",s:"WAF",dom:"sec_c",sk:"both",desc:"ModSecurity 3.x + OWASP CRS. OWASP Top 10. Prevention/Detection. Anomaly scoring. Алерты→ClickHouse. 4 lib.",lang:"Python",fw:"aiohttp, ModSecurity",det:["ModSecurity+CRS","OWASP Top 10","Anomaly scoring","4 lib"]},
+{id:"proxy",n:"proxy-backend",s:"Прокси (Squid)",dom:"sec_c",sk:"both",desc:"TPROXY/явный. SSL Bump (bump/splice/peek). eCAP: AV, URL, морф. HTTP-кэш. NTLM/Kerberos auth. 9 lib.",lang:"Python",fw:"aiohttp, Squid",det:["TPROXY","SSL Bump","eCAP","HTTP-кэш","9 lib"]},
+{id:"reverse",n:"reverse-backend",s:"Обратный прокси",dom:"sec_c",sk:"both",desc:"Nginx reverse proxy. TLS-терминация. Let's Encrypt (ACME). WAF интеграция. Auth. Балансировка upstream. 7 lib.",lang:"Python",fw:"aiohttp, nginx",det:["TLS","Let's Encrypt","WAF","Auth","7 lib"]},
+{id:"cert",n:"cert-backend",s:"PKI / Сертификаты",dom:"sec_c",sk:"both",desc:"CA NGFW. SSL Bump/VPN/Web certs. CRL/OCSP. Автопродление. Импорт PEM/PFX/DER. CSR. 4 lib.",lang:"Python",fw:"aiohttp, OpenSSL",det:["CA","CRL/OCSP","Автопродление","Импорт","4 lib"]},
+{id:"vpnsrv",n:"vpn-servers-backend",s:"VPN-серверы",dom:"vpn_c",sk:"both",desc:"IKEv2/L2TP/SSTP/WG/OVPN. Автогенерация профилей. strongSwan (charon). Split tunneling. 11 lib.",lang:"Python",fw:"aiohttp, strongSwan",det:["5 протоколов","Профили","strongSwan","Split tunnel","11 lib"]},
+{id:"ipsec",n:"ipsec-backend",s:"IPSec site-to-site",dom:"vpn_c",sk:"both",desc:"IKEv1/IKEv2. Phase 1+2 SA. DPD/PFS/NAT-T. Multi-site (звезда/mesh). strongSwan. 12 lib.",lang:"Python",fw:"aiohttp, strongSwan",det:["IKEv1/v2","SA Phase 1+2","DPD/PFS/NAT-T","12 lib"]},
+{id:"gostvpn",n:"gost-vpn-backend",s:"ГОСТ VPN",dom:"vpn_c",sk:"both",desc:"ГОСТ Р 34.12-2015. Кузнечик (128)/Магма (64). КИИ/госорганы/ФСБ. 5 lib.",lang:"Python",fw:"aiohttp",det:["Кузнечик/Магма","КИИ/ФСБ","5 lib"]},
+{id:"agent",n:"agent-backend",s:"Ideco Client",dom:"vpn_c",sk:"both",desc:"Push профилей. Win/macOS/Linux/Android/iOS. 1 клик. Автопереподключение. Выбор протокола. 10 lib.",lang:"Python",fw:"aiohttp",det:["Push профилей","5 платформ","1 клик","10 lib"]},
+{id:"wg",n:"wireguard-backend",s:"WireGuard",dom:"vpn_c",sk:"both",desc:"Kernel-модуль (~4K строк). Noise/ChaCha20/Curve25519. Peers+ключи. QR-коды. Авто-маршруты.",lang:"Python",fw:"aiohttp, wg-tools",det:["Kernel (~4K)","ChaCha20","QR-коды"]},
+{id:"routing",n:"routing-backend",s:"Маршрутизация (FRR)",dom:"rt_c",sk:"both",desc:"FRR: zebra/bgpd/ospfd. Static/PBR/BGP/OSPF. Балансировка WAN. Failover (ping/HTTP). 12 lib.",lang:"Python",fw:"aiohttp, FRRouting",det:["Static/PBR","BGP/OSPF","Failover","12 lib"]},
+{id:"acl",n:"acl-backend",s:"ACL трансляция",dom:"acl_d",sk:"both",desc:"etcd watch: firewall+alias. → eBPF maps (XDP) + VPP ACL plugin. Атомарное обновление. NFLOG→CH. 3 lib.",lang:"Python",fw:"aiohttp, eBPF",det:["etcd watch","eBPF+VPP ACL","Атомарное","NFLOG→CH"]},
+{id:"bpf",n:"bpf-acl-rules",s:"eBPF (XDP)",dom:"acl_d",sk:"classic",desc:"XDP фильтрация до стека. C→LLVM→BPF. eBPF maps (hash/LPM). Миллионы pps. Classic only.",lang:"C (eBPF)",fw:"XDP, libbpf",det:["XDP","Миллионы pps","eBPF maps","Classic only"]},
+{id:"nflog",n:"ideco-nflog",s:"NFLOG → CH",dom:"acl_d",sk:"both",desc:"NFLOG target. accept/drop → raw_traffic_journal (ClickHouse). libnetfilter_log.",lang:"C",fw:"libnetfilter_log",det:["NFLOG","accept/drop","raw_traffic_journal"]},
+{id:"vpp",n:"vpp-backend",s:"VPP / DPDK",dom:"vpp_d",sk:"vpp",desc:"fd.io VPP. DPDK PMD/AF_XDP. Vector processing. KNI (↔Linux). L2-бриджи. etcd RUNTIME. →ClickHouse. VPP only. 4 lib.",lang:"Python+C",fw:"fd.io VPP, DPDK",det:["DPDK PMD/AF_XDP","Vector","KNI","etcd RUNTIME","VPP only"]},
+{id:"ecap_av",n:"ecap-av",s:"eCAP: антивирус",dom:"px_d",sk:"both",desc:"libecap in-process. Unix socket→clamd/klms. Блокировка+уведомление.",lang:"C++",fw:"libecap",det:["In-process","clamd/klms","Блокировка"]},
+{id:"ecap_urls",n:"ecap-urls",s:"eCAP: URL-фильтр",dom:"px_d",sk:"both",desc:"RocksDB lookup (мкс). 145 категорий bitmap. C++ inline.",lang:"C++",fw:"libecap, RocksDB",det:["RocksDB (мкс)","145 категорий","C++ inline"]},
+{id:"appctrl",n:"app-control-nfq",s:"DPI (L7)",dom:"px_d",sk:"both",desc:"nDPI NFQUEUE. 300+ протоколов. Telegram/YouTube/BitTorrent. →flow-stat-server. DPI-профили.",lang:"C++",fw:"NFQUEUE, nDPI",det:["nDPI (300+)","L7-фильтрация","→flow-stat"]},
+{id:"flowsrv",n:"flow-stat-server",s:"DPI-приём",dom:"st_d",sk:"both",desc:"Flow records от DPI. Ring buffer агрегация. →flow-stat-exporter.",lang:"C",fw:"custom",det:["Ring buffer","→exporter"]},
+{id:"flowexp",n:"flow-stat-exporter",s:"DPI → CH",dom:"st_d",sk:"both",desc:"Batch clickhouse-cpp. Буфер 1000rec/5с. Таблица flow_stats.",lang:"C++",fw:"clickhouse-cpp",det:["Batch insert","1000/5с"]},
+{id:"trafmond",n:"trafmond",s:"Монитор трафика",dom:"st_d",sk:"both",desc:"conntrack (Netlink). DNS-кэш (IP→домен). Реальное время.",lang:"Python",fw:"pyroute2",det:["conntrack","DNS-кэш","Realtime"]},
+{id:"system",n:"system-backend",s:"Ядро системы",dom:"sys_i",sk:"both",desc:"Hostname/TZ/NTP (chrony). CPU/RAM/диски (psutil). Веб-терминал (xterm.js). Администраторы (bcrypt). GeoIP (MaxMind). system-lib: 20+ потребителей. 6 lib.",lang:"Python",fw:"aiohttp",det:["Hostname/TZ/NTP","psutil","xterm.js","GeoIP","system-lib: 20+"]},
+{id:"license",n:"license-backend",s:"Лицензии",dom:"sys_i",sk:"both",desc:"Активация (hardware ID). Подписки IPS/AV/CF/VPN. Лимиты пользователей. Fallback: ET Open+ClamAV. 4 lib.",lang:"Python",fw:"aiohttp",det:["Hardware ID","Подписки","Лимиты","4 lib"]},
+{id:"backup",n:"backup-backend",s:"Бэкапы",dom:"sys_i",sk:"both",desc:"etcd dump+конфиги→tar.gz. Cron/вручную. Restore/откат. Авто-бэкап при обновлении. NFS/SMB.",lang:"Python",fw:"aiohttp",det:["etcd dump","Cron","Restore","NFS/SMB"]},
+{id:"sysupd",n:"sysupdate-backend",s:"Обновления",dom:"sys_i",sk:"both",desc:"RPM, ядро Linux, базы IPS/AV/CF/GeoIP. Авто-обновление (cron). Changelog.",lang:"Python",fw:"aiohttp, rpm",det:["RPM","Базы IPS/AV/CF","GeoIP","Cron"]},
+{id:"mail",n:"mail-backend",s:"Почтовый релей",dom:"sys_i",sk:"both",desc:"Postfix SMTP relay. Уведомления, рассылка отчётов. DKIM/SPF/TLS.",lang:"Python",fw:"aiohttp, Postfix",det:["Postfix","DKIM/SPF/TLS"]},
+{id:"vce",n:"vce-backend",s:"VCE",dom:"sys_i",sk:"both",desc:"Изолированные инстансы NGFW. Classic/High-Perf. Мультитенантность (ISP). vce-lib: 35+ потребителей.",lang:"Python",fw:"aiohttp",det:["Изоляция","Classic/High-Perf","vce-lib: 35+"]},
+{id:"cc",n:"central-console",s:"Ideco Center",dom:"sys_i",sk:"both",desc:"Единая консоль для парка NGFW. Шаблоны политик. Мониторинг. ISP/enterprise.",lang:"Python",fw:"aiohttp",det:["Парк NGFW","Шаблоны","Мониторинг"]},
+{id:"cluster",n:"cluster-backend",s:"Кластер HA",dom:"ha_i",sk:"both",desc:"Active-Passive (2 ноды). VRRP (keepalived). Failover 3-5с. Синхронизация etcd. 5 lib.",lang:"Python",fw:"aiohttp, keepalived",det:["Active-Passive","VRRP","Failover 3-5с","5 lib"]},
 ];
-
-var DBS=[
-  {id:"db_etcd",n:"etcd",sub:"PERMANENT + RUNTIME",desc:"Distributed KV-store. Центральная шина конфигурации. Паттерн: write → watch → react.",color:CE},
-  {id:"db_ch",n:"ClickHouse",sub:"Аналитика и логи",desc:"Колоночная СУБД. 14+ бэкендов пишут, reports-backend читает.",color:CC},
-  {id:"db_sq",n:"SQLite",sub:"Локальные данные",desc:"ad-backend (кэш AD), user-backend (учётки), suricata-backend (правила IPS).",color:CS},
-  {id:"db_rk",n:"RocksDB",sub:"URL-категории",desc:"Key-value для контент-фильтра. 145 категорий URL.",color:CR},
-];
-
+var DBS=[{id:"db_perm",n:"etcd PERMANENT",sub:"Постоянная конфигурация",desc:"Правила, настройки, объекты. Сохраняется при перезагрузке.\nwrite → watch → react.",color:CE},{id:"db_run",n:"etcd RUNTIME",sub:"Оперативные данные",desc:"Состояние интерфейсов, сессии, статусы.\nПерезаписывается при старте.",color:CE2},{id:"db_ch",n:"ClickHouse",sub:"Аналитика и логи",desc:"raw_traffic_journal, dns_journal, suricata_alerts, waf_events, flow_stats.\n14+ бэкендов пишут.",color:CC},{id:"db_sq",n:"SQLite",sub:"Локальные данные",desc:"Кэш AD, учётки, IPS rules.",color:CS},{id:"db_rk",n:"RocksDB",sub:"URL-категории",desc:"145 категорий. Lookup мкс.",color:CR}];
+var DB_COMP_MAP={"db_perm":DB_PERM,"db_run":DB_RUN,"db_ch":DB_CH,"db_sq":DB_SQ,"db_rk":DB_RK};
 var CW=148,CG=5,RH=36,RG=3,DT=16,LT=30,LP=12,IW=170,DMW=160;
-
-function buildLayout(){
-  var pos={},y=8,mW=0;
-  LAYERS.forEach(function(lay){
-    var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});
-    var tw=LP;ds.forEach(function(){tw+=CW+CG+10;});
-    if(tw>mW)mW=tw;
-  });
-  LAYERS.forEach(function(lay){
-    var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});
-    var maxR=0;ds.forEach(function(dk){var cnt=C.filter(function(c){return c.dom===dk;}).length;if(cnt>maxR)maxR=cnt;});
-    var lH=LT+maxR*(RH+RG)+DT+12;
-    pos["L_"+lay.id]={x:LP,y:y,w:mW,h:lH};
-    var dx=LP+6;
-    ds.forEach(function(dk){
-      var comps=C.filter(function(c){return c.dom===dk;});
-      var dW=CW+8;
-      pos["D_"+dk]={x:dx,y:y+LT,w:dW,h:lH-LT-6};
-      comps.forEach(function(c,ci){pos[c.id]={x:dx+4,y:y+LT+DT+ci*(RH+RG),w:CW,h:RH};});
-      dx+=dW+CG;
-    });
-    y+=lH+6;
-  });
-  var iH=y-8-6;var iX=mW+LP+10;
-  pos.INFRA={x:iX,y:8,w:IW,h:iH};
-  var infraDs=Object.keys(DOMS).filter(function(k){return DOMS[k].ly==="infra";});
-  var iy=40;
-  infraDs.forEach(function(dk){
-    var comps=C.filter(function(c){return c.dom===dk;});
-    var dH=comps.length*(RH+RG)+DT+8;
-    pos["D_"+dk]={x:iX+6,y:8+iy,w:IW-12,h:dH};
-    comps.forEach(function(c,ci){pos[c.id]={x:iX+10,y:8+iy+DT+ci*(RH+RG),w:IW-20,h:RH};});
-    iy+=dH+6;
-  });
-  pos["D_db_i"]={x:iX+6,y:8+iy,w:IW-12,h:DBS.length*42+DT+8};
-  DBS.forEach(function(db,di){pos[db.id]={x:iX+10,y:8+iy+DT+di*42,w:IW-20,h:36};});
-  var dmX=iX+IW+10;
-  var dmH=DAEMONS.length*34+40;
-  pos.DAEMON_BLOCK={x:dmX,y:8,w:DMW,h:Math.max(dmH,iH)};
-  DAEMONS.forEach(function(dm,di){pos[dm.id]={x:dmX+10,y:48+di*34,w:DMW-20,h:28};});
-  return pos;
-}
+function buildLayout(){var pos={},y=8,mW=0;LAYERS.forEach(function(lay){var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});var tw=LP;ds.forEach(function(){tw+=CW+CG+10;});if(tw>mW)mW=tw;});LAYERS.forEach(function(lay){var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});var maxR=0;ds.forEach(function(dk){var cnt=C.filter(function(c){return c.dom===dk;}).length;if(cnt>maxR)maxR=cnt;});var lH=LT+maxR*(RH+RG)+DT+12;pos["L_"+lay.id]={x:LP,y:y,w:mW,h:lH};var dx=LP+6;ds.forEach(function(dk){var comps=C.filter(function(c){return c.dom===dk;});var dW=CW+8;pos["D_"+dk]={x:dx,y:y+LT,w:dW,h:lH-LT-6};comps.forEach(function(c,ci){pos[c.id]={x:dx+4,y:y+LT+DT+ci*(RH+RG),w:CW,h:RH};});dx+=dW+CG;});y+=lH+6;});var iH=y-8-6,iX=mW+LP+10;pos.INFRA={x:iX,y:8,w:IW,h:iH};var infraDs=Object.keys(DOMS).filter(function(k){return DOMS[k].ly==="infra";});var iy=40;infraDs.forEach(function(dk){var comps=C.filter(function(c){return c.dom===dk;});var dH=comps.length*(RH+RG)+DT+8;pos["D_"+dk]={x:iX+6,y:8+iy,w:IW-12,h:dH};comps.forEach(function(c,ci){pos[c.id]={x:iX+10,y:8+iy+DT+ci*(RH+RG),w:IW-20,h:RH};});iy+=dH+6;});pos["D_db_i"]={x:iX+6,y:8+iy,w:IW-12,h:DBS.length*38+DT+8};DBS.forEach(function(db,di){pos[db.id]={x:iX+10,y:8+iy+DT+di*38,w:IW-20,h:32};});var dmX=iX+IW+10,dmH=DAEMONS.length*34+40;pos.DAEMON_BLOCK={x:dmX,y:8,w:DMW,h:Math.max(dmH,iH)};DAEMONS.forEach(function(dm,di){pos[dm.id]={x:dmX+10,y:48+di*34,w:DMW-20,h:28};});return pos;}
 var POS=buildLayout();
-
-function getConnected(id){
-  var libs=LIBS[id];if(!libs)return new Set();
-  var s=new Set();
-  libs.forEach(function(lib){var m=LIB2ID[lib];if(m&&m!==id)s.add(m);});
-  Object.keys(LIBS).forEach(function(oid){if(oid===id)return;(LIBS[oid]||[]).forEach(function(lib){var m=LIB2ID[lib];if(m===id)s.add(oid);});});
-  return s;
-}
-function usesEtcd(id){var c=C.find(function(x){return x.id===id;});return c&&c.lang&&c.lang.indexOf("Python")>=0;}
-function getDaemonsForComp(id){return DAEMONS.filter(function(dm){return dm.relBackends.indexOf(id)>=0;});}
-function getCompsForDaemon(dmId){var dm=DAEMONS.find(function(d){return d.id===dmId;});if(!dm)return[];return dm.relBackends.map(function(bid){return C.find(function(c){return c.id===bid;});}).filter(Boolean);}
-function getDmConnIds(dmId){var dm=DAEMONS.find(function(d){return d.id===dmId;});if(!dm)return new Set();return new Set(dm.relBackends);}
+function getConn(id){var libs=LIBS[id];if(!libs)return new Set();var s=new Set();libs.forEach(function(lib){var m=LIB2ID[lib];if(m&&m!==id)s.add(m);});Object.keys(LIBS).forEach(function(oid){if(oid===id)return;(LIBS[oid]||[]).forEach(function(lib){var m=LIB2ID[lib];if(m===id)s.add(oid);});});return s;}
+function getLibsBtw(a,b){var r=[];(LIBS[a]||[]).forEach(function(l){if(LIB2ID[l]===b)r.push(l);});(LIBS[b]||[]).forEach(function(l){if(LIB2ID[l]===a&&r.indexOf(l)<0)r.push(l);});return r;}
+function getDmForC(id){return DAEMONS.filter(function(d){return d.rb.indexOf(id)>=0;});}
+function getCForDm(did){var d=DAEMONS.find(function(x){return x.id===did;});return d?d.rb.map(function(b){return C.find(function(c){return c.id===b;});}).filter(Boolean):[];}
+function getDbC(did){return DB_COMP_MAP[did]||[];}
+var SC={"classic":"#6a8caf","vpp":"#e06a4a","both":"#8a8aaa"};var SL={"classic":"Classic","vpp":"VPP","both":"Classic + VPP"};var SS={"classic":"CLS","vpp":"VPP","both":"C+V"};
 
 function App(){
-  var svgRef=useRef(null);
-  var [sel,setSel]=useState(null);
-  var [hov,setHov]=useState(null);
-  var [pan,setPan]=useState({x:0,y:0});
-  var [zoom,setZoom]=useState(0.48);
-  var [panning,setPanning]=useState(false);
-  var ps=useRef(null);
-  var [search,setSearch]=useState("");
-  var [selLayer,setSelLayer]=useState(null);
-  var [selDom,setSelDom]=useState(null);
-  var [selDb,setSelDb]=useState(null);
-  var [selDaemon,setSelDaemon]=useState(null);
-  var [hovDaemon,setHovDaemon]=useState(null);
-
-  var actComp=sel||hov;
-  var actDm=selDaemon||hovDaemon;
-  var connected=useMemo(function(){return actComp?getConnected(actComp):new Set();},[actComp]);
+  var svgRef=useRef(null);var[sel,setSel]=useState(null);var[hov,setHov]=useState(null);var[pan,setPan]=useState({x:0,y:0});var[zoom,setZoom]=useState(0.48);var[panning,setPanning]=useState(false);var ps=useRef(null);var dd=useRef(false);var[search,setSearch]=useState("");var[sL,setSL]=useState(null);var[sD,setSD]=useState(null);var[sDb,setSDb]=useState(null);var[sDm,setSDm]=useState(null);var[hDm,setHDm]=useState(null);var[hDb,setHDb]=useState(null);var[tt,setTT]=useState(null);
+  var ac=sel||hov,ad=sDm||hDm,adb=sDb||hDb;
+  var conn=useMemo(function(){return ac?getConn(ac):new Set();},[ac]);
   var selC=C.find(function(c){return c.id===sel;});
-  var sIds=useMemo(function(){if(!search.trim())return null;var q=search.toLowerCase();return new Set(C.filter(function(c){return c.n.toLowerCase().indexOf(q)>=0||c.s.toLowerCase().indexOf(q)>=0||c.desc.toLowerCase().indexOf(q)>=0;}).map(function(c){return c.id;}));},[search]);
-  var dmConnBk=useMemo(function(){return actDm?getDmConnIds(actDm):new Set();},[actDm]);
-
-  var dbLines=useMemo(function(){if(!actComp)return[];var fp=POS[actComp];if(!fp)return[];var lines=[];
-    if(DB_MAP.ch.indexOf(actComp)>=0){var p=POS.db_ch;if(p)lines.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p.x,y2:p.y+p.h/2,color:CC});}
-    if(DB_MAP.sq.indexOf(actComp)>=0){var p2=POS.db_sq;if(p2)lines.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p2.x,y2:p2.y+p2.h/2,color:CS});}
-    if(DB_MAP.rk.indexOf(actComp)>=0){var p3=POS.db_rk;if(p3)lines.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p3.x,y2:p3.y+p3.h/2,color:CR});}
-    if(usesEtcd(actComp)){var pe=POS.db_etcd;if(pe)lines.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:pe.x,y2:pe.y+pe.h/2,color:CE});}
-    return lines;},[actComp]);
-
-  var compDmLines=useMemo(function(){if(!actComp)return[];var fp=POS[actComp];if(!fp)return[];var lines=[];
-    getDaemonsForComp(actComp).forEach(function(dm){var dp=POS[dm.id];if(dp)lines.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:DM});});
-    return lines;},[actComp]);
-
-  var dmBkLines=useMemo(function(){if(!actDm)return[];var dp=POS[actDm];if(!dp)return[];var lines=[];
-    dmConnBk.forEach(function(bid){var bp=POS[bid];if(bp)lines.push({x1:dp.x,y1:dp.y+dp.h/2,x2:bp.x+bp.w,y2:bp.y+bp.h/2,color:DM});});
-    return lines;},[actDm,dmConnBk]);
-
-  var svcLines=useMemo(function(){if(!actComp)return[];var fp=POS[actComp];if(!fp)return[];var lines=[];
-    connected.forEach(function(cid){var tp=POS[cid];if(tp)lines.push({x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,color:O+"66"});});
-    return lines;},[actComp,connected]);
-
+  var sIds=useMemo(function(){if(!search.trim())return null;var q=search.toLowerCase();return new Set(C.filter(function(c){return c.n.toLowerCase().indexOf(q)>=0||c.s.toLowerCase().indexOf(q)>=0;}).map(function(c){return c.id;}));},[search]);
+  var dmBk=useMemo(function(){if(!ad)return new Set();var d=DAEMONS.find(function(x){return x.id===ad;});return d?new Set(d.rb):new Set();},[ad]);
+  var dbBk=useMemo(function(){return adb?new Set(getDbC(adb)):new Set();},[adb]);
+  var dbLines=useMemo(function(){if(ac){var fp=POS[ac];if(!fp)return[];var r=[];DBS.forEach(function(db){if(getDbC(db.id).indexOf(ac)>=0){var p=POS[db.id];if(p)r.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p.x,y2:p.y+p.h/2,color:db.color,did:db.id});}});return r;}if(adb){var dp=POS[adb];if(!dp)return[];var db2=DBS.find(function(d){return d.id===adb;});if(!db2)return[];return getDbC(adb).map(function(cid){var cp=POS[cid];if(!cp)return null;return{x1:cp.x+cp.w,y1:cp.y+cp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:db2.color,did:adb};}).filter(Boolean);}return[];},[ac,adb]);
+  var cdmL=useMemo(function(){if(!ac)return[];var fp=POS[ac];if(!fp)return[];return getDmForC(ac).map(function(dm){var dp=POS[dm.id];return dp?{x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:DM}:null;}).filter(Boolean);},[ac]);
+  var dmbL=useMemo(function(){if(!ad)return[];var dp=POS[ad];if(!dp)return[];return Array.from(dmBk).map(function(b){var bp=POS[b];return bp?{x1:dp.x,y1:dp.y+dp.h/2,x2:bp.x+bp.w,y2:bp.y+bp.h/2,color:DM}:null;}).filter(Boolean);},[ad,dmBk]);
+  var svcL=useMemo(function(){if(!ac)return[];var fp=POS[ac];if(!fp)return[];return Array.from(conn).map(function(cid){var tp=POS[cid];if(!tp)return null;var libs=getLibsBtw(ac,cid);var desc=libs.map(function(l){return LINK_DESC[l]||l;}).join("\n");return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,color:O+"66",desc:desc,cid:cid,libs:libs};}).filter(Boolean);},[ac,conn]);
   var onW=useCallback(function(e){e.preventDefault();var r=svgRef.current.getBoundingClientRect();var mx=e.clientX-r.left,my=e.clientY-r.top;var f=e.deltaY>0?.93:1.07;var nz=Math.max(.15,Math.min(2.5,zoom*f));setPan(function(p){return{x:mx-(mx-p.x)*(nz/zoom),y:my-(my-p.y)*(nz/zoom)};});setZoom(nz);},[zoom]);
   useEffect(function(){var el=svgRef.current;if(el)el.addEventListener("wheel",onW,{passive:false});return function(){if(el)el.removeEventListener("wheel",onW);};},[onW]);
-  var onMD=useCallback(function(e){setPanning(true);ps.current={x:e.clientX-pan.x,y:e.clientY-pan.y};},[pan]);
-  var onMM=useCallback(function(e){if(panning&&ps.current)setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});},[panning]);
+  var onMD=useCallback(function(e){setPanning(true);ps.current={x:e.clientX-pan.x,y:e.clientY-pan.y};dd.current=false;},[pan]);
+  var onMM=useCallback(function(e){if(panning&&ps.current){var dx=e.clientX-ps.current.x-pan.x,dy=e.clientY-ps.current.y-pan.y;if(Math.abs(dx)>3||Math.abs(dy)>3)dd.current=true;setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});}},[panning,pan]);
   var onMU=useCallback(function(){setPanning(false);ps.current=null;},[]);
+  function clr(){if(!dd.current){setSel(null);setSL(null);setSD(null);setSDb(null);setSDm(null);}}
+  function si(fn,v,e){e.stopPropagation();if(dd.current)return;fn(v);}
+  function showTT(e,t){var r=svgRef.current.getBoundingClientRect();setTT({x:e.clientX-r.left+12,y:e.clientY-r.top-8,text:t});}
 
-  function clr(){setSel(null);setSelLayer(null);setSelDom(null);setSelDb(null);setSelDaemon(null);}
-
-  var sideContent=null;
+  var side=null;
   if(selC){
-    var relDm=getDaemonsForComp(selC.id);var hasEtcd=usesEtcd(selC.id);
-    sideContent=(
-      React.createElement("div",{style:{padding:16}},
+    var rdm=getDmForC(selC.id),cdbs=DBS.filter(function(db){return getDbC(db.id).indexOf(selC.id)>=0;});
+    var lcs=[];conn.forEach(function(cid){var c2=C.find(function(x){return x.id===cid;});if(!c2)return;getLibsBtw(selC.id,cid).forEach(function(l){lcs.push({cid:cid,nm:c2.n,lib:l,desc:LINK_DESC[l]||l});});});
+    side=React.createElement("div",{style:{padding:16}},
+      React.createElement("div",{style:{display:"flex",gap:6,alignItems:"center",marginBottom:8}},
         React.createElement("span",{style:{background:O,color:BG,fontSize:8,padding:"2px 8px",borderRadius:4,fontWeight:700}},DOMS[selC.dom]?DOMS[selC.dom].l:""),
-        React.createElement("h2",{style:{margin:"8px 0 2px",fontSize:18,color:TX,fontFamily:"monospace"}},selC.n),
-        React.createElement("div",{style:{fontSize:13,color:Ob,fontWeight:600,marginBottom:12}},selC.s),
-        React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",margin:"0 0 16px",whiteSpace:"pre-line"}},selC.desc),
-        React.createElement("div",{style:{background:BG,borderRadius:8,padding:12,marginBottom:16,border:"1px solid "+BD}},
-          React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}},"Стек"),
-          React.createElement("div",{style:{display:"flex",gap:12}},
-            React.createElement("div",null,React.createElement("div",{style:{fontSize:8,color:TD}},"Язык"),React.createElement("div",{style:{fontSize:13,color:TX,fontWeight:600}},selC.lang)),
-            React.createElement("div",{style:{width:1,background:BD}}),
-            React.createElement("div",null,React.createElement("div",{style:{fontSize:8,color:TD}},"Фреймворк"),React.createElement("div",{style:{fontSize:13,color:TX,fontWeight:600}},selC.fw))
-          )
-        ),
-        selC.det&&selC.det.length>0&&React.createElement("div",{style:{marginBottom:16}},
-          React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Возможности"),
-          selC.det.map(function(d,i){return React.createElement("div",{key:i,style:{display:"flex",gap:8,padding:"3px 0"}},React.createElement("div",{style:{width:4,height:4,borderRadius:2,background:O,marginTop:6,flexShrink:0}}),React.createElement("span",{style:{fontSize:12,color:TX,lineHeight:"1.5"}},d));})
-        ),
-        hasEtcd&&React.createElement("div",{style:{marginBottom:16}},
-          React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Хранилище конфигурации"),
-          React.createElement("div",{onClick:function(){setSelDb("db_etcd");setSel(null);setSelLayer(null);setSelDom(null);setSelDaemon(null);},style:{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:5,cursor:"pointer",background:CE+"12",border:"1px solid "+CE+"33"}},
-            React.createElement("div",{style:{width:8,height:8,borderRadius:4,background:CE,flexShrink:0}}),
-            React.createElement("div",null,React.createElement("div",{style:{fontSize:12,color:CE,fontWeight:600}},"etcd"),React.createElement("div",{style:{fontSize:10,color:TM}},"PERMANENT + RUNTIME"))
-          )
-        ),
-        relDm.length>0&&React.createElement("div",{style:{marginBottom:16}},
-          React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Связанные Daemon'ы ("+relDm.length+")"),
-          relDm.map(function(dm){return React.createElement("div",{key:dm.id,onClick:function(){setSelDaemon(dm.id);setSel(null);setSelLayer(null);setSelDom(null);setSelDb(null);},style:{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:5,cursor:"pointer",background:DM+"12",border:"1px solid "+DM+"33",marginBottom:3}},React.createElement("div",{style:{width:8,height:8,borderRadius:4,background:DM,flexShrink:0}}),React.createElement("div",null,React.createElement("div",{style:{fontSize:12,color:DM,fontWeight:600}},dm.n),React.createElement("div",{style:{fontSize:10,color:TM}},dm.sub)));})
-        ),
-        connected.size>0&&React.createElement("div",{style:{marginBottom:16}},
-          React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Связанные модули ("+connected.size+")"),
-          React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:3}},
-            Array.from(connected).map(function(cid){var cc2=C.find(function(x){return x.id===cid;});if(!cc2)return null;return React.createElement("span",{key:cid,onClick:function(){setSel(cid);},style:{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 6px",borderRadius:3,cursor:"pointer"}},cc2.n);})
-          )
-        )
-      )
+        React.createElement("span",{style:{background:SC[selC.sk]+"33",color:SC[selC.sk],fontSize:8,padding:"2px 6px",borderRadius:4,fontWeight:700,border:"1px solid "+SC[selC.sk]+"55"}},SL[selC.sk])),
+      React.createElement("h2",{style:{margin:"0 0 2px",fontSize:18,color:TX,fontFamily:"monospace"}},selC.n),
+      React.createElement("div",{style:{fontSize:13,color:Ob,fontWeight:600,marginBottom:12}},selC.s),
+      React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",margin:"0 0 16px",whiteSpace:"pre-line"}},selC.desc),
+      React.createElement("div",{style:{background:BG,borderRadius:8,padding:12,marginBottom:16,border:"1px solid "+BD}},
+        React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:8}},"Стек"),
+        React.createElement("div",{style:{display:"flex",gap:12}},
+          React.createElement("div",null,React.createElement("div",{style:{fontSize:8,color:TD}},"Язык"),React.createElement("div",{style:{fontSize:13,color:TX,fontWeight:600}},selC.lang)),
+          React.createElement("div",{style:{width:1,background:BD}}),
+          React.createElement("div",null,React.createElement("div",{style:{fontSize:8,color:TD}},"Фреймворк"),React.createElement("div",{style:{fontSize:13,color:TX,fontWeight:600}},selC.fw)),
+          React.createElement("div",{style:{width:1,background:BD}}),
+          React.createElement("div",null,React.createElement("div",{style:{fontSize:8,color:TD}},"Режим"),React.createElement("div",{style:{fontSize:13,color:SC[selC.sk],fontWeight:600}},SL[selC.sk])))),
+      selC.det&&React.createElement("div",{style:{marginBottom:16}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Возможности"),selC.det.map(function(d,i){return React.createElement("div",{key:i,style:{display:"flex",gap:8,padding:"3px 0"}},React.createElement("div",{style:{width:4,height:4,borderRadius:2,background:O,marginTop:6,flexShrink:0}}),React.createElement("span",{style:{fontSize:12,color:TX,lineHeight:"1.5"}},d));})),
+      cdbs.length>0&&React.createElement("div",{style:{marginBottom:16}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Хранилища ("+cdbs.length+")"),cdbs.map(function(db){return React.createElement("div",{key:db.id,onClick:function(){setSDb(db.id);setSel(null);setSDm(null);},style:{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:5,cursor:"pointer",background:db.color+"12",border:"1px solid "+db.color+"33",marginBottom:3}},React.createElement("div",{style:{width:8,height:8,borderRadius:4,background:db.color,flexShrink:0}}),React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:db.color,fontWeight:600}},db.n),React.createElement("div",{style:{fontSize:9,color:TM}},DB_LINK_DESC[db.id]||db.sub)));})),
+      rdm.length>0&&React.createElement("div",{style:{marginBottom:16}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Daemon'ы ("+rdm.length+")"),rdm.map(function(dm){return React.createElement("div",{key:dm.id,onClick:function(){setSDm(dm.id);setSel(null);},style:{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",borderRadius:5,cursor:"pointer",background:DM+"12",border:"1px solid "+DM+"33",marginBottom:3}},React.createElement("div",{style:{width:8,height:8,borderRadius:4,background:DM,flexShrink:0}}),React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:DM,fontWeight:600}},dm.n),React.createElement("div",{style:{fontSize:9,color:TM}},dm.sub)));})),
+      lcs.length>0&&React.createElement("div",{style:{marginBottom:16}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Связи ("+lcs.length+")"),lcs.map(function(lc,i){return React.createElement("div",{key:i,onClick:function(){setSel(lc.cid);},style:{padding:"5px 8px",borderRadius:5,cursor:"pointer",background:BG,marginBottom:2,border:"1px solid "+BD}},React.createElement("div",{style:{display:"flex",justifyContent:"space-between"}},React.createElement("span",{style:{fontSize:11,color:O,fontWeight:600,fontFamily:"monospace"}},lc.nm),React.createElement("span",{style:{fontSize:9,color:TD}},lc.lib)),React.createElement("div",{style:{fontSize:10,color:TM}},lc.desc));}))
     );
-  } else if(selDaemon){
-    var dm=DAEMONS.find(function(d){return d.id===selDaemon;});var dmC=dm?getCompsForDaemon(selDaemon):[];
-    sideContent=dm?React.createElement("div",{style:{padding:16}},
-      React.createElement("div",{style:{display:"inline-block",background:DM+"22",border:"1px solid "+DM+"44",borderRadius:4,padding:"2px 8px",marginBottom:8}},React.createElement("span",{style:{fontSize:8,color:DM,fontWeight:700}},"SYSTEM DAEMON")),
-      React.createElement("h2",{style:{fontSize:18,color:DM,margin:"0 0 4px"}},dm.n),
-      React.createElement("div",{style:{fontSize:12,color:Ob,marginBottom:12}},dm.sub),
-      React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},dm.desc),
-      dmC.length>0&&React.createElement("div",{style:{marginTop:16}},
-        React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Связанные бэкенды ("+dmC.length+")"),
-        React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:3}},dmC.map(function(bc){return React.createElement("span",{key:bc.id,onClick:function(){setSel(bc.id);setSelDaemon(null);},style:{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 6px",borderRadius:3,cursor:"pointer"}},bc.n);}))
-      )
-    ):null;
-  } else if(selLayer){
-    sideContent=React.createElement("div",{style:{padding:16}},
-      React.createElement("h2",{style:{fontSize:18,color:selLayer==="daemon"?DM:O,margin:"0 0 12px"}},selLayer==="infra"?INFRA_LABEL:selLayer==="daemon"?"SYSTEM DAEMONS":(LAYERS.find(function(l){return l.id===selLayer;})||{}).label||""),
-      React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},LAYER_DESC[selLayer]||"")
-    );
-  } else if(selDom){
-    sideContent=React.createElement("div",{style:{padding:16}},
-      React.createElement("h2",{style:{fontSize:18,color:O,margin:"0 0 12px"}},DOMS[selDom]?DOMS[selDom].l:""),
-      React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},DOM_DESC[selDom]||""),
-      React.createElement("div",{style:{marginTop:12}},
-        React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Компоненты"),
-        C.filter(function(c){return c.dom===selDom;}).map(function(c){return React.createElement("div",{key:c.id,onClick:function(){setSel(c.id);setSelDom(null);},style:{padding:"6px 8px",borderRadius:5,cursor:"pointer",background:BG,marginBottom:3,border:"1px solid "+BD}},React.createElement("div",{style:{fontSize:12,color:TX,fontWeight:600,fontFamily:"monospace"}},c.n),React.createElement("div",{style:{fontSize:10,color:TM}},c.s));})
-      )
-    );
-  } else if(selDb){
-    var db=DBS.find(function(d){return d.id===selDb;});
-    sideContent=db?React.createElement("div",{style:{padding:16}},
-      React.createElement("h2",{style:{fontSize:18,color:db.color,margin:"0 0 4px"}},db.n),
-      React.createElement("div",{style:{fontSize:12,color:Ob,marginBottom:12}},db.sub),
-      React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},db.desc)
-    ):null;
+  } else if(sDm){
+    var dm=DAEMONS.find(function(d){return d.id===sDm;});var dmc=dm?getCForDm(sDm):[];
+    side=dm?React.createElement("div",{style:{padding:16}},React.createElement("span",{style:{background:DM+"22",border:"1px solid "+DM+"44",borderRadius:4,padding:"2px 8px",fontSize:8,color:DM,fontWeight:700}},"SYSTEM DAEMON"),React.createElement("h2",{style:{fontSize:18,color:DM,margin:"8px 0 4px"}},dm.n),React.createElement("div",{style:{fontSize:12,color:Ob,marginBottom:12}},dm.sub),React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},dm.desc),dmc.length>0&&React.createElement("div",{style:{marginTop:16}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Бэкенды ("+dmc.length+")"),React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:3}},dmc.map(function(bc){return React.createElement("span",{key:bc.id,onClick:function(){setSel(bc.id);setSDm(null);},style:{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 6px",borderRadius:3,cursor:"pointer"}},bc.n);})))):null;
+  } else if(sDb){
+    var db=DBS.find(function(d){return d.id===sDb;});var dbc=db?getDbC(db.id):[];
+    side=db?React.createElement("div",{style:{padding:16}},React.createElement("h2",{style:{fontSize:18,color:db.color,margin:"0 0 4px"}},db.n),React.createElement("div",{style:{fontSize:12,color:Ob,marginBottom:12}},db.sub),React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},db.desc),React.createElement("div",{style:{marginTop:12,padding:"8px 10px",background:BG,borderRadius:6,border:"1px solid "+db.color+"33"}},React.createElement("div",{style:{fontSize:9,color:db.color,fontWeight:700,marginBottom:4}},"ПЕРЕДАВАЕМЫЕ ДАННЫЕ"),React.createElement("div",{style:{fontSize:11,color:TX}},DB_LINK_DESC[db.id]||"")),dbc.length>0&&React.createElement("div",{style:{marginTop:12}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Бэкенды ("+dbc.length+")"),React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:3}},dbc.map(function(cid){var c2=C.find(function(x){return x.id===cid;});return c2?React.createElement("span",{key:cid,onClick:function(){setSel(cid);setSDb(null);},style:{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 6px",borderRadius:3,cursor:"pointer"}},c2.n):null;})))):null;
+  } else if(sL){
+    side=React.createElement("div",{style:{padding:16}},React.createElement("h2",{style:{fontSize:18,color:sL==="daemon"?DM:sL==="infra"?O3:O,margin:"0 0 12px"}},sL==="infra"?"INFRASTRUCTURE":sL==="daemon"?"SYSTEM DAEMONS":(LAYERS.find(function(l){return l.id===sL;})||{}).label||""),React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},LAYER_DESC[sL]||""));
+  } else if(sD){
+    side=React.createElement("div",{style:{padding:16}},React.createElement("h2",{style:{fontSize:18,color:O,margin:"0 0 12px"}},DOMS[sD]?DOMS[sD].l:""),React.createElement("p",{style:{fontSize:13,color:TX,lineHeight:"1.7",whiteSpace:"pre-line"}},DOM_DESC[sD]||""),React.createElement("div",{style:{marginTop:12}},React.createElement("div",{style:{fontSize:9,color:TD,fontWeight:700,textTransform:"uppercase",letterSpacing:"1px",marginBottom:6}},"Компоненты"),C.filter(function(c){return c.dom===sD;}).map(function(c){return React.createElement("div",{key:c.id,onClick:function(){setSel(c.id);setSD(null);},style:{padding:"6px 8px",borderRadius:5,cursor:"pointer",background:BG,marginBottom:3,border:"1px solid "+BD}},React.createElement("div",{style:{display:"flex",justifyContent:"space-between"}},React.createElement("span",{style:{fontSize:12,color:TX,fontWeight:600,fontFamily:"monospace"}},c.n),React.createElement("span",{style:{fontSize:8,color:SC[c.sk],background:SC[c.sk]+"22",padding:"1px 4px",borderRadius:3}},SL[c.sk])),React.createElement("div",{style:{fontSize:10,color:TM}},c.s));})));
   }
-
-  var showSB=sideContent!==null;
-  var hasAny=actComp||actDm;
+  var showSB=side!==null,hasAny=ac||ad||adb;
 
   return React.createElement("div",{style:{width:"100%",height:"100vh",background:BG,fontFamily:"system-ui,sans-serif",display:"flex",overflow:"hidden"}},
     React.createElement("div",{style:{flex:1,position:"relative"}},
-      React.createElement("svg",{ref:svgRef,width:"100%",height:"100%",style:{cursor:panning?"grabbing":"grab"},onMouseDown:onMD,onMouseMove:onMM,onMouseUp:onMU,onMouseLeave:onMU,onClick:function(){clr();}},
-        React.createElement("defs",null,
-          React.createElement("filter",{id:"gl"},React.createElement("feGaussianBlur",{stdDeviation:"2",result:"g"}),React.createElement("feMerge",null,React.createElement("feMergeNode",{in:"g"}),React.createElement("feMergeNode",{in:"SourceGraphic"}))),
-          React.createElement("filter",{id:"gldm"},React.createElement("feGaussianBlur",{stdDeviation:"1.5",result:"g"}),React.createElement("feMerge",null,React.createElement("feMergeNode",{in:"g"}),React.createElement("feMergeNode",{in:"SourceGraphic"})))
-        ),
+      React.createElement("svg",{ref:svgRef,width:"100%",height:"100%",style:{cursor:panning?"grabbing":"grab"},onMouseDown:onMD,onMouseMove:onMM,onMouseUp:onMU,onMouseLeave:function(){onMU();setTT(null);},onClick:clr},
+        React.createElement("defs",null,React.createElement("filter",{id:"gl"},React.createElement("feGaussianBlur",{stdDeviation:"2",result:"g"}),React.createElement("feMerge",null,React.createElement("feMergeNode",{in:"g"}),React.createElement("feMergeNode",{in:"SourceGraphic"}))),React.createElement("filter",{id:"gd"},React.createElement("feGaussianBlur",{stdDeviation:"1.5",result:"g"}),React.createElement("feMerge",null,React.createElement("feMergeNode",{in:"g"}),React.createElement("feMergeNode",{in:"SourceGraphic"})))),
         React.createElement("g",{transform:"translate("+pan.x+","+pan.y+") scale("+zoom+")"},
-          svcLines.map(function(l,i){return React.createElement("line",{key:"s"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:1.5,opacity:0.4,strokeDasharray:"4,3"});}),
-          dbLines.map(function(l,i){return React.createElement("line",{key:"d"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2.5,opacity:0.5,strokeDasharray:"6,4",filter:"url(#gl)"});}),
-          compDmLines.map(function(l,i){return React.createElement("line",{key:"cdm"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2,opacity:0.5,strokeDasharray:"4,4",filter:"url(#gldm)"});}),
-          dmBkLines.map(function(l,i){return React.createElement("line",{key:"dml"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2,opacity:0.5,strokeDasharray:"4,4",filter:"url(#gldm)"});}),
-          LAYERS.map(function(lay){var p=POS["L_"+lay.id];if(!p)return null;return React.createElement("g",{key:lay.id,onClick:function(e){e.stopPropagation();setSelLayer(lay.id);setSel(null);setSelDom(null);setSelDb(null);setSelDaemon(null);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:10,fill:lay.color+"08",stroke:lay.color+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:p.x+10,y:p.y+15,fontSize:11,fontWeight:800,fill:lay.color,letterSpacing:"1"},lay.label),React.createElement("text",{x:p.x+10,y:p.y+26,fontSize:7,fill:TD},lay.desc));}),
-          POS.INFRA&&React.createElement("g",{onClick:function(e){e.stopPropagation();setSelLayer("infra");setSel(null);setSelDom(null);setSelDb(null);setSelDaemon(null);},style:{cursor:"pointer"}},React.createElement("rect",{x:POS.INFRA.x,y:POS.INFRA.y,width:POS.INFRA.w,height:POS.INFRA.h,rx:10,fill:O3+"08",stroke:O3+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:POS.INFRA.x+8,y:POS.INFRA.y+16,fontSize:11,fontWeight:800,fill:O3,letterSpacing:"1"},"INFRASTRUCTURE"),React.createElement("text",{x:POS.INFRA.x+8,y:POS.INFRA.y+28,fontSize:7,fill:TD},"Ядро, кластер, хранилища")),
-          POS.DAEMON_BLOCK&&React.createElement("g",{onClick:function(e){e.stopPropagation();setSelLayer("daemon");setSel(null);setSelDom(null);setSelDb(null);setSelDaemon(null);},style:{cursor:"pointer"}},React.createElement("rect",{x:POS.DAEMON_BLOCK.x,y:POS.DAEMON_BLOCK.y,width:POS.DAEMON_BLOCK.w,height:POS.DAEMON_BLOCK.h,rx:10,fill:DM+"06",stroke:DM+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:POS.DAEMON_BLOCK.x+8,y:POS.DAEMON_BLOCK.y+16,fontSize:11,fontWeight:800,fill:DM,letterSpacing:"1"},"SYSTEM DAEMONS"),React.createElement("text",{x:POS.DAEMON_BLOCK.x+8,y:POS.DAEMON_BLOCK.y+28,fontSize:7,fill:TD},"Процессы ОС")),
-          DAEMONS.map(function(dm){var p=POS[dm.id];if(!p)return null;var isS=selDaemon===dm.id,isH=hovDaemon===dm.id,isR=actComp&&dm.relBackends.indexOf(actComp)>=0;var dim=hasAny&&!isS&&!isH&&!isR;return React.createElement("g",{key:dm.id,onMouseEnter:function(){setHovDaemon(dm.id);},onMouseLeave:function(){setHovDaemon(null);},onClick:function(e){e.stopPropagation();setSelDaemon(selDaemon===dm.id?null:dm.id);setSel(null);setSelLayer(null);setSelDom(null);setSelDb(null);},style:{cursor:"pointer"},opacity:dim?0.08:1},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isS?DM+"25":isH?DM+"18":isR?DM+"15":CD,stroke:isS?DM:isH?DM+"88":isR?DM+"66":DM+"22",strokeWidth:isS?2:isR?1.5:1}),React.createElement("text",{x:p.x+6,y:p.y+12,fontSize:8.5,fontWeight:700,fill:isS||isH||isR?DM:TM},dm.n),React.createElement("text",{x:p.x+6,y:p.y+22,fontSize:6.5,fill:TD},dm.sub));}),
-          Object.keys(DOMS).map(function(dk){var dv=DOMS[dk];var p=POS["D_"+dk];if(!p)return null;return React.createElement("g",{key:dk,onClick:function(e){e.stopPropagation();setSelDom(dk);setSel(null);setSelLayer(null);setSelDb(null);setSelDaemon(null);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:6,fill:CD,stroke:dv.c+"30"}),React.createElement("text",{x:p.x+5,y:p.y+11,fontSize:7.5,fontWeight:600,fill:dv.c},dv.l));}),
-          DBS.map(function(db){var p=POS[db.id];if(!p)return null;var isC=actComp&&dbLines.some(function(l){return Math.abs(l.x2-p.x)<5&&Math.abs(l.y2-(p.y+p.h/2))<20;});return React.createElement("g",{key:db.id,onClick:function(e){e.stopPropagation();setSelDb(db.id);setSel(null);setSelLayer(null);setSelDom(null);setSelDaemon(null);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isC?db.color+"22":CD,stroke:isC?db.color:db.color+"44",strokeWidth:isC?2.5:1}),React.createElement("text",{x:p.x+6,y:p.y+14,fontSize:9,fontWeight:700,fill:db.color},db.n),React.createElement("text",{x:p.x+6,y:p.y+26,fontSize:6.5,fill:TD},db.sub));}),
-          C.map(function(c){var p=POS[c.id];if(!p)return null;var isS=sel===c.id,isH=hov===c.id,isC=connected.has(c.id),isDC=dmConnBk.has(c.id);var dim=(actComp&&!isS&&!isH&&!isC)||(actDm&&!isDC)||(sIds&&!sIds.has(c.id));return React.createElement("g",{key:c.id,onMouseEnter:function(){setHov(c.id);},onMouseLeave:function(){setHov(null);},onClick:function(e){e.stopPropagation();setSel(sel===c.id?null:c.id);setSelLayer(null);setSelDom(null);setSelDb(null);setSelDaemon(null);},style:{cursor:"pointer"},opacity:dim?0.08:1},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isS?O+"30":isH?O+"18":isC?O+"12":isDC?DM+"15":CD,stroke:isS?O:isC?O+"66":isDC?DM+"66":BD,strokeWidth:isS?2:isC||isDC?1.5:1}),React.createElement("text",{x:p.x+5,y:p.y+13,fontSize:8.5,fontWeight:700,fill:isS?TX:isC?O:isDC?DM:TM},c.n),React.createElement("text",{x:p.x+5,y:p.y+24,fontSize:6.5,fill:TD},c.s));})
+          svcL.map(function(l,i){return React.createElement("line",{key:"s"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2.5,opacity:.5,strokeDasharray:"4,3",onMouseEnter:function(e){showTT(e,l.desc);},onMouseLeave:function(){setTT(null);},style:{cursor:"help",pointerEvents:"stroke"}});}),
+          dbLines.map(function(l,i){return React.createElement("line",{key:"d"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2.5,opacity:.5,strokeDasharray:"6,4",filter:"url(#gl)",onMouseEnter:function(e){showTT(e,DB_LINK_DESC[l.did]||"");},onMouseLeave:function(){setTT(null);},style:{cursor:"help",pointerEvents:"stroke"}});}),
+          cdmL.map(function(l,i){return React.createElement("line",{key:"c"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2,opacity:.5,strokeDasharray:"4,4",filter:"url(#gd)"});}),
+          dmbL.map(function(l,i){return React.createElement("line",{key:"m"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2,opacity:.5,strokeDasharray:"4,4",filter:"url(#gd)"});}),
+          LAYERS.map(function(lay){var p=POS["L_"+lay.id];if(!p)return null;return React.createElement("g",{key:lay.id,onClick:function(e){si(function(v){setSL(v);setSel(null);setSD(null);setSDb(null);setSDm(null);},lay.id,e);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:10,fill:lay.color+"08",stroke:lay.color+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:p.x+10,y:p.y+15,fontSize:11,fontWeight:800,fill:lay.color,letterSpacing:"1"},lay.label),React.createElement("text",{x:p.x+10,y:p.y+26,fontSize:7,fill:TD},lay.desc));}),
+          POS.INFRA&&React.createElement("g",{onClick:function(e){si(function(){setSL("infra");setSel(null);setSD(null);setSDb(null);setSDm(null);},null,e);},style:{cursor:"pointer"}},React.createElement("rect",{x:POS.INFRA.x,y:POS.INFRA.y,width:POS.INFRA.w,height:POS.INFRA.h,rx:10,fill:O3+"08",stroke:O3+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:POS.INFRA.x+8,y:POS.INFRA.y+16,fontSize:11,fontWeight:800,fill:O3,letterSpacing:"1"},"INFRASTRUCTURE")),
+          POS.DAEMON_BLOCK&&React.createElement("g",{onClick:function(e){si(function(){setSL("daemon");setSel(null);setSD(null);setSDb(null);setSDm(null);},null,e);},style:{cursor:"pointer"}},React.createElement("rect",{x:POS.DAEMON_BLOCK.x,y:POS.DAEMON_BLOCK.y,width:POS.DAEMON_BLOCK.w,height:POS.DAEMON_BLOCK.h,rx:10,fill:DM+"06",stroke:DM+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),React.createElement("text",{x:POS.DAEMON_BLOCK.x+8,y:POS.DAEMON_BLOCK.y+16,fontSize:11,fontWeight:800,fill:DM,letterSpacing:"1"},"SYSTEM DAEMONS")),
+          DAEMONS.map(function(dm){var p=POS[dm.id];if(!p)return null;var isS=sDm===dm.id,isH=hDm===dm.id,isR=ac&&dm.rb.indexOf(ac)>=0;var dim=hasAny&&!isS&&!isH&&!isR&&!adb;return React.createElement("g",{key:dm.id,onMouseEnter:function(){setHDm(dm.id);},onMouseLeave:function(){setHDm(null);},onClick:function(e){si(function(v){setSDm(v);setSel(null);setSL(null);setSD(null);setSDb(null);},sDm===dm.id?null:dm.id,e);},style:{cursor:"pointer"},opacity:dim?.08:1},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isS?DM+"25":isH||isR?DM+"15":CD,stroke:isS?DM:isH||isR?DM+"66":DM+"22",strokeWidth:isS?2:1}),React.createElement("text",{x:p.x+6,y:p.y+12,fontSize:8.5,fontWeight:700,fill:isS||isH||isR?DM:TM},dm.n),React.createElement("text",{x:p.x+6,y:p.y+22,fontSize:6.5,fill:TD},dm.sub));}),
+          Object.keys(DOMS).map(function(dk){var dv=DOMS[dk],p=POS["D_"+dk];if(!p)return null;return React.createElement("g",{key:dk,onClick:function(e){si(function(v){setSD(v);setSel(null);setSL(null);setSDb(null);setSDm(null);},dk,e);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:6,fill:CD,stroke:dv.c+"30"}),React.createElement("text",{x:p.x+5,y:p.y+11,fontSize:7.5,fontWeight:600,fill:dv.c},dv.l));}),
+          DBS.map(function(db){var p=POS[db.id];if(!p)return null;var isC=(ac&&getDbC(db.id).indexOf(ac)>=0)||(adb===db.id);return React.createElement("g",{key:db.id,onMouseEnter:function(){setHDb(db.id);},onMouseLeave:function(){setHDb(null);},onClick:function(e){si(function(v){setSDb(v);setSel(null);setSL(null);setSD(null);setSDm(null);},sDb===db.id?null:db.id,e);},style:{cursor:"pointer"}},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isC?db.color+"22":CD,stroke:isC?db.color:db.color+"44",strokeWidth:isC?2.5:1}),React.createElement("text",{x:p.x+6,y:p.y+12,fontSize:8.5,fontWeight:700,fill:db.color},db.n),React.createElement("text",{x:p.x+6,y:p.y+24,fontSize:6,fill:TD},db.sub));}),
+          C.map(function(c){var p=POS[c.id];if(!p)return null;var isS=sel===c.id,isH=hov===c.id,isC=conn.has(c.id),isDC=dmBk.has(c.id),isDbC=dbBk.has(c.id);var dim=(ac&&!isS&&!isH&&!isC)||(ad&&!isDC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id));var sc=SC[c.sk];return React.createElement("g",{key:c.id,onMouseEnter:function(){setHov(c.id);},onMouseLeave:function(){setHov(null);},onClick:function(e){si(function(v){setSel(v);setSL(null);setSD(null);setSDb(null);setSDm(null);},sel===c.id?null:c.id,e);},style:{cursor:"pointer"},opacity:dim?.08:1},React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:isS?O+"30":isH?O+"18":isC?O+"12":isDC?DM+"15":isDbC?CE+"12":CD,stroke:isS?O:isC?O+"66":isDC?DM+"66":isDbC?CE+"55":BD,strokeWidth:isS?2:isC||isDC||isDbC?1.5:1}),React.createElement("text",{x:p.x+5,y:p.y+13,fontSize:8.5,fontWeight:700,fill:isS?TX:isC?O:isDC?DM:isDbC?CE:TM},c.n),React.createElement("text",{x:p.x+5,y:p.y+24,fontSize:6.5,fill:TD},c.s),React.createElement("rect",{x:p.x+p.w-28,y:p.y+2,width:26,height:9,rx:2,fill:sc+"22",stroke:sc+"44",strokeWidth:.5}),React.createElement("text",{x:p.x+p.w-15,y:p.y+9,fontSize:5,fontWeight:700,fill:sc,textAnchor:"middle"},SS[c.sk]));})
         )
       ),
-      React.createElement("div",{style:{position:"absolute",top:8,left:8,zIndex:20}},
-        React.createElement("input",{value:search,onChange:function(e){setSearch(e.target.value);},placeholder:"🔍 Поиск...",style:{width:180,padding:"5px 10px",borderRadius:6,border:"1px solid "+BD,background:BG+"dd",color:TX,fontSize:11,outline:"none"}})
-      ),
-      React.createElement("div",{style:{position:"absolute",bottom:8,left:8,display:"flex",gap:3,zIndex:20}},
-        React.createElement("button",{onClick:function(){setZoom(Math.min(2.5,zoom*1.2));},style:btnS},"+"),
-        React.createElement("button",{onClick:function(){setZoom(Math.max(.15,zoom/1.2));},style:btnS},"−"),
-        React.createElement("button",{onClick:function(){setZoom(.48);setPan({x:0,y:0});},style:btnS},"⟲")
-      ),
-      React.createElement("div",{style:{position:"absolute",bottom:8,right:showSB?428:8,display:"flex",gap:8,zIndex:20,background:CD+"ee",borderRadius:6,padding:"6px 10px",border:"1px solid "+BD}},
-        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},React.createElement("div",{style:{width:8,height:3,background:O,borderRadius:1}}),React.createElement("span",{style:{fontSize:9,color:TM}},"Зависимость")),
-        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},React.createElement("div",{style:{width:8,height:3,background:CE,borderRadius:1}}),React.createElement("span",{style:{fontSize:9,color:TM}},"etcd")),
-        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},React.createElement("div",{style:{width:8,height:3,background:CC,borderRadius:1}}),React.createElement("span",{style:{fontSize:9,color:TM}},"ClickHouse")),
-        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},React.createElement("div",{style:{width:8,height:3,background:DM,borderRadius:1}}),React.createElement("span",{style:{fontSize:9,color:TM}},"Daemon"))
-      )
+      tt&&React.createElement("div",{style:{position:"absolute",left:tt.x,top:tt.y,background:CD+"f5",border:"1px solid "+BD,borderRadius:6,padding:"6px 10px",maxWidth:260,zIndex:30,pointerEvents:"none"}},React.createElement("div",{style:{fontSize:11,color:TX,lineHeight:"1.5",whiteSpace:"pre-line"}},tt.text)),
+      React.createElement("div",{style:{position:"absolute",top:8,left:8,zIndex:20}},React.createElement("input",{value:search,onChange:function(e){setSearch(e.target.value);},placeholder:"🔍 Поиск...",style:{width:180,padding:"5px 10px",borderRadius:6,border:"1px solid "+BD,background:BG+"dd",color:TX,fontSize:11,outline:"none"}})),
+      React.createElement("div",{style:{position:"absolute",bottom:8,left:8,display:"flex",gap:3,zIndex:20}},React.createElement("button",{onClick:function(){setZoom(Math.min(2.5,zoom*1.2));},style:btnS},"+"),React.createElement("button",{onClick:function(){setZoom(Math.max(.15,zoom/1.2));},style:btnS},"−"),React.createElement("button",{onClick:function(){setZoom(.48);setPan({x:0,y:0});},style:btnS},"⟲")),
+      React.createElement("div",{style:{position:"absolute",bottom:8,right:showSB?428:8,display:"flex",gap:6,zIndex:20,background:CD+"ee",borderRadius:6,padding:"6px 10px",border:"1px solid "+BD,flexWrap:"wrap"}},[{c:O,l:"Зависимость"},{c:CE,l:"etcd PERM"},{c:CE2,l:"etcd RUN"},{c:CC,l:"ClickHouse"},{c:CS,l:"SQLite"},{c:CR,l:"RocksDB"},{c:DM,l:"Daemon"}].map(function(x,i){return React.createElement("div",{key:i,style:{display:"flex",alignItems:"center",gap:3}},React.createElement("div",{style:{width:8,height:3,background:x.c,borderRadius:1}}),React.createElement("span",{style:{fontSize:8,color:TM}},x.l));}))
     ),
-    showSB&&React.createElement("div",{style:{width:420,minWidth:420,background:CD,borderLeft:"1px solid "+BD,overflowY:"auto",display:"flex",flexDirection:"column"}},
-      React.createElement("div",{style:{display:"flex",justifyContent:"flex-end",padding:"8px 12px 0",flexShrink:0}},
-        React.createElement("button",{onClick:function(){clr();},style:{background:"none",border:"none",color:TD,cursor:"pointer",fontSize:18}},"✕")
-      ),
-      React.createElement("div",{style:{flex:1,overflowY:"auto"}},sideContent)
-    )
+    showSB&&React.createElement("div",{style:{width:420,minWidth:420,background:CD,borderLeft:"1px solid "+BD,overflowY:"auto",display:"flex",flexDirection:"column"}},React.createElement("div",{style:{display:"flex",justifyContent:"flex-end",padding:"8px 12px 0",flexShrink:0}},React.createElement("button",{onClick:function(){setSel(null);setSL(null);setSD(null);setSDb(null);setSDm(null);},style:{background:"none",border:"none",color:TD,cursor:"pointer",fontSize:18}},"✕")),React.createElement("div",{style:{flex:1,overflowY:"auto"}},side))
   );
 }
-
 var btnS={width:28,height:28,borderRadius:5,border:"1px solid "+BD,background:CD,color:TX,cursor:"pointer",fontSize:14};
-
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
 </script>
 </body>
