@@ -242,7 +242,7 @@ function App(){
           <span style={{fontSize:13,fontWeight:700,color:O}}>👥 Команды</span>
           <div style={{display:"flex",gap:4}}>
             {undoStack.length>0&&<button onClick={doUndo} style={{background:"none",border:"1px solid "+T.BD,borderRadius:4,color:T.TX,cursor:"pointer",fontSize:10,padding:"2px 6px"}}>↩ Отмена</button>}
-            {SHOW_TEAMS_BUTTON&&<button onClick={function(){setShowTeams(false);}} style={{background:"none",border:"none",color:T.TD,cursor:"pointer",fontSize:14}}>✕</button>
+            {SHOW_TEAMS_BUTTON&&<button onClick={function(){setShowTeams(false);}} style={{background:"none",border:"none",color:T.TD,cursor:"pointer",fontSize:14}}>✕</button>}
           </div>
         </div>
         <div style={{padding:"0 12px 6px",fontSize:9,color:T.TD,flexShrink:0}}>Перетаскивайте бэкенды между командами</div>
