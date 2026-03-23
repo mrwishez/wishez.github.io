@@ -339,7 +339,7 @@ function App(){
         {activeSc&&<div style={{position:"absolute",bottom:42,left:8,right:showSB?390:8,zIndex:20,background:T.CD+"f5",border:"1px solid #4ecdc444",borderRadius:8,padding:"10px 14px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <span style={{fontSize:12,color:"#4ecdc4",fontWeight:700}}>{activeSc.name}</span>
-            <button onClick={function(){setScenario(null);}} style={{background:"none",border:"none",color:T.TD,cursor:"pointer"}}>✕</button>
+            {SHOW_TEAMS_BUTTON&&<button onClick={function(){setShowTeams(!showTeams);}} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}}>👥 Команды</button>}
           </div>
           <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
             <button onClick={function(){setScStep(Math.max(0,scStep-1));}} disabled={scStep===0} style={{padding:"3px 8px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:10,opacity:scStep===0?.4:1}}>←</button>
