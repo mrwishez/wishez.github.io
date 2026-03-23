@@ -155,11 +155,11 @@ function getDbC(did){return DB_COMP_MAP[did]||[];}
 
 function App(){
   var svgRef=useRef(null);
-  var[theme,setTheme]=useState("dark");var T=THEMES[theme];
-  var[sel,setSel]=useState(null);var[pan,setPan]=useState({x:0,y:0});var[zoom,setZoom]=useState(0.42);var[panning,setPanning]=useState(false);var ps=useRef(null);var dd=useRef(false);
+  var[theme,setTheme]=useState("light");var T=THEMES[theme];
+  var[sel,setSel]=useState(null);var[pan,setPan]=useState({x:0,y:0});var[zoom,setZoom]=useState(0.52);var[panning,setPanning]=useState(false);var ps=useRef(null);var dd=useRef(false);
   var[search,setSearch]=useState("");var[sL,setSL]=useState(null);var[sD,setSD]=useState(null);var[sDb,setSDb]=useState(null);var[hDb,setHDb]=useState(null);var[tt,setTT]=useState(null);
   var[scenario,setScenario]=useState(null);var[scStep,setScStep]=useState(0);
-  var[teams,setTeams]=useState(DEFAULT_TEAMS);var[showTeams,setShowTeams]=useState(true);
+  var[teams,setTeams]=useState(DEFAULT_TEAMS);var[showTeams,setShowTeams]=useState(false);
   var[dragComp,setDragComp]=useState(null);var[dragOver,setDragOver]=useState(null);
   var[teamHL,setTeamHL]=useState(null);
   /* Undo stack */
