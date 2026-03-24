@@ -331,7 +331,7 @@ function App(){
         <div style={{position:"absolute",top:8,left:8,zIndex:20,display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
           <input value={search} onChange={function(e){setSearch(e.target.value);setScenario(null);setTeamHL(null);}} placeholder="🔍 Поиск..." style={{width:140,padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.BG+"ee",color:T.TX,fontSize:11,outline:"none"}}/>
           <select value={scenario||""} onChange={function(e){var v=e.target.value;setScenario(v||null);setScStep(0);setSel(null);setSDb(null);setTeamHL(null);}} style={{padding:"5px 6px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,fontSize:10,outline:"none",cursor:"pointer"}}><option value="">📋 Сценарии</option>{SCENARIOS.map(function(sc2){return <option key={sc2.id} value={sc2.id}>{sc2.name}</option>;})}</select>
-          <button onClick={function(){setShowTeams(!showTeams);}} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}}>👥 Команды</button>
+          {SHOW_TEAMS_BUTTON&&<button onClick={function(){setShowTeams(!showTeams);}} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}}>👥 Команды</button>}
           <button onClick={function(){setTheme(theme==="dark"?"light":"dark");}} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:10}}>{theme==="dark"?"☀️":"🌙"}</button>
         </div>
 
