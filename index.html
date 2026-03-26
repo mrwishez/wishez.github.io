@@ -96,7 +96,46 @@ const DB_SQ_USR = ["user"];
 const DB_SQ_IPS = ["suricata_be","suricata_dp"];
 const DB_RK     = ["cf","ecap_urls"];
 
-const LINK_DESC = { alias:"Объекты",auth:"Аутент.",cert:"Серт.",cluster:"Кластер",license:"Лицензии",vce:"VCE",system:"Системные",firewall:"Правила МСЭ",routing:"Маршруты",l2manager:"Интерфейсы",proxy:"Прокси","content-filter":"URL",av:"AV",reports:"Отчёты",alerts:"Алерты","inet-access":"Доступ","ad-users":"AD",sessions:"Сессии","vpn-servers":"VPN",agent:"Client",ipsec:"IPSec","gost-vpn":"ГОСТ","dhcp-server":"DHCP",suricata:"IPS",waf:"WAF",servers:"Серверы","vpn-authd":"VPN auth",vpp:"VPP" };
+const LINK_DESC = {
+  alias:"Объекты",auth:"Аутент.",cert:"Серт.",cluster:"Кластер",
+  license:"Лицензии",vce:"VCE",system:"Системные",firewall:"Правила МСЭ",
+  routing:"Маршруты",l2manager:"Интерфейсы",proxy:"Прокси",
+  "content-filter":"URL",av:"AV",reports:"Отчёты",alerts:"Алерты",
+  "inet-access":"Доступ","ad-users":"AD",sessions:"Сессии",
+  "vpn-servers":"VPN",agent:"Client",ipsec:"IPSec","gost-vpn":"ГОСТ",
+  "dhcp-server":"DHCP",suricata:"IPS",waf:"WAF",servers:"Серверы",
+  "vpn-authd":"VPN auth",vpp:"VPP"
+};
+const LINK_FULL_DESC = {
+  alias:"alias-lib — объектная модель NGFW. Объекты (IP, FQDN, сервисы, расписания, зоны) переиспользуются во всех правилах. Изменение объекта через etcd watch автоматически обновляет все правила.",
+  auth:"auth-lib — сессии авторизации и проверка доступа. Компонент читает из etcd RUNTIME текущие сессии пользователей и их группы для применения политик.",
+  cert:"cert-lib — SSL-сертификаты. Компонент получает актуальные сертификаты CA и модульные цепочки для TLS-терминации, VPN, веб-интерфейса.",
+  cluster:"cluster-lib — состояние кластера HA. Компонент читает роль ноды (Master/Standby) и статус синхронизации для корректной работы в Active-Passive режиме.",
+  license:"license-lib — проверка лицензии. Компонент проверяет доступность модуля (IPS ET Pro, Kaspersky, контент-фильтр) и лимит одновременных пользователей.",
+  vce:"vce-lib — виртуальные контексты. Компонент работает в контексте конкретного VCE и использует его изоляцию ресурсов. Импортируют 35+ бэкендов.",
+  system:"system-lib — базовые настройки сервера. Часовой пояс, язык, конфигурация администраторов. Импортируют 20+ бэкендов.",
+  firewall:"firewall-lib — правила МСЭ. Компонент читает таблицы FORWARD/INPUT/DNAT/SNAT и профили безопасности для трансляции в ACL Data Plane.",
+  routing:"routing-lib — таблица маршрутизации. Компонент читает маршруты (PBR, статика, BGP, OSPF) для генерации конфигурации FRRouting.",
+  l2manager:"l2manager-lib — сетевые интерфейсы. Компонент получает список интерфейсов (Ethernet, VLAN, Bond, Bridge, KNI) для привязки правил и сервисов.",
+  proxy:"proxy-lib — конфигурация Squid. Компонент читает режим проксирования (TPROXY/прямой), SSL Bump настройки для генерации squid.conf.",
+  "content-filter":"content-filter-lib — профили контент-фильтра. Компонент читает категории URL и политики (какие группы пользователей что видят) из etcd.",
+  av:"av-lib — конфигурация антивируса. Компонент получает настройки движка (ClamAV/Kaspersky) и режим проверки для eCAP-модуля в Squid.",
+  reports:"reports-lib — аналитика из ClickHouse. Компонент запрашивает агрегированные данные (журнал МСЭ, веб-трафик, IPS-алерты) для построения отчётов.",
+  alerts:"alerts-lib — система уведомлений. Компонент отправляет уведомления при превышении порогов (CPU, RAM, падение канала, IPS-алерты) через email/Telegram.",
+  "inet-access":"inet-access-lib — управление доступом в интернет. Компонент проверяет авторизацию пользователя и применяет политики доступа.",
+  "ad-users":"ad-users-lib — пользователи и группы AD. Компонент читает кэш AD (SQLite) для резолвинга пользователей в правилах без обращения к контроллеру домена.",
+  sessions:"sessions-lib — активные сессии авторизации. Компонент читает из etcd RUNTIME текущие IP↔пользователь сессии.",
+  "vpn-servers":"vpn-servers-lib — конфигурация VPN-серверов. Компонент читает настройки IKEv2/L2TP/SSTP серверов, пулы IP и маршруты для клиентов.",
+  agent:"agent-lib — Ideco Client. Компонент управляет push-профилями и Device VPN конфигурацией для фирменного клиента.",
+  ipsec:"ipsec-lib — IPSec site-to-site туннели. Компонент читает конфигурацию SA (Phase 1/2), DPD, PFS, NAT-T для strongSwan.",
+  "gost-vpn":"gost-vpn-lib — ГОСТ VPN. Компонент читает конфигурацию туннелей с шифрованием по ГОСТ Р 34.12-2015 (Кузнечик/Магма).",
+  "dhcp-server":"dhcp-server-lib — конфигурация DHCP. Компонент читает пулы адресов, резервирования по MAC и relay-настройки для ISC DHCP daemon.",
+  suricata:"suricata-lib — IPS профили и правила. Компонент читает группы сигнатур (ET Open/Pro, Snort, пользовательские) и профили для Suricata daemon.",
+  waf:"waf-lib — Web Application Firewall. Компонент читает профили ModSecurity и OWASP CRS настройки для защиты опубликованных веб-ресурсов.",
+  servers:"servers-lib — внешние серверы. Компонент читает адреса syslog-коллекторов, NTP и DNS upstream серверов.",
+  "vpn-authd":"vpn-authd-lib — аутентификация VPN. Компонент взаимодействует с vpn-authd daemon для проверки учётных данных при подключении IKEv2/L2TP.",
+  vpp:"vpp-lib — конфигурация VPP. Компонент взаимодействует с VPP daemon через Python API для настройки интерфейсов, ACL и L2-бриджей в высокопроизводительном контексте."
+};
 const DB_LINK_DESC = {
   db_perm:"etcd PERMANENT — постоянная конфигурация NGFW.\n\nПравила МСЭ, объекты alias, настройки модулей, учётные записи. Сохраняется при перезагрузке.\n\nПаттерн взаимодействия: write → watch → react. Бэкенды общаются через etcd, не напрямую.",
   db_run: "etcd RUNTIME — оперативные данные.\n\nПересоздаётся при старте: link up/down, скорость интерфейсов, MTU, активные сессии авторизации, статусы бэкендов, текущие VPN-соединения.",
@@ -308,27 +347,45 @@ function getDpLinks(id){return DP_LINKS.filter(l=>l.from===id||l.to===id);}
 // FIX #2: ортогональный путь между двумя прямоугольниками
 // Выходим от ближайшей стороны, делаем одно колено (L-shape)
 function orthoPts(ax,ay,aw,ah, bx,by,bw,bh) {
-  const aCy=ay+ah/2, bCy=by+bh/2;
-  const aCx=ax+aw/2, bCx=bx+bw/2;
-  let x1,y1,x2,y2,mx,my;
-  if(ax+aw<=bx) {
-    // A левее B: выходим вправо от A, входим слева в B
-    x1=ax+aw; y1=aCy; x2=bx; y2=bCy;
-    mx=x2; my=y1;
-  } else if(bx+bw<=ax) {
-    // A правее B: выходим влево от A, входим справа в B
-    x1=ax; y1=aCy; x2=bx+bw; y2=bCy;
-    mx=x2; my=y1;
-  } else if(ay+ah<=by) {
-    // A выше B: выходим снизу из A, входим сверху в B
-    x1=aCx; y1=ay+ah; x2=bCx; y2=by;
-    mx=x1; my=y2;
+  const aCx=ax+aw/2, aCy=ay+ah/2;
+  const bCx=bx+bw/2, bCy=by+bh/2;
+  const STUB=10; // длина перпендикулярного отрезка от рамки
+  let x1,y1,ex1,ey1, x2,y2,ex2,ey2;
+
+  // Определяем лучшую сторону выхода из A и входа в B
+  // на основе относительного положения центров
+  const dx=bCx-aCx, dy=bCy-aCy;
+  const adx=Math.abs(dx), ady=Math.abs(dy);
+
+  // Сторона выхода из A
+  if(adx>=ady){
+    if(dx>0){ x1=ax+aw; y1=aCy; ex1=x1+STUB; ey1=y1; }
+    else     { x1=ax;    y1=aCy; ex1=x1-STUB; ey1=y1; }
   } else {
-    // A ниже B: выходим сверху из A, входим снизу в B
-    x1=aCx; y1=ay; x2=bCx; y2=by+bh;
-    mx=x1; my=y2;
+    if(dy>0){ x1=aCx; y1=ay+ah; ex1=x1; ey1=y1+STUB; }
+    else     { x1=aCx; y1=ay;    ex1=x1; ey1=y1-STUB; }
   }
-  return `M${x1},${y1} L${mx},${my} L${x2},${y2}`;
+
+  // Сторона входа в B (противоположная логика)
+  if(adx>=ady){
+    if(dx>0){ x2=bx;    y2=bCy; ex2=x2-STUB; ey2=y2; }
+    else     { x2=bx+bw; y2=bCy; ex2=x2+STUB; ey2=y2; }
+  } else {
+    if(dy>0){ x2=bCx; y2=by;    ex2=x2; ey2=y2-STUB; }
+    else     { x2=bCx; y2=by+bh; ex2=x2; ey2=y2+STUB; }
+  }
+
+  // Средняя точка для излома — перпендикулярное колено
+  // Горизонтальный выход: идём горизонтально до x2, потом вертикально
+  // Вертикальный выход: идём вертикально до y2, потом горизонтально
+  let mx,my;
+  if(Math.abs(ex1-x1)>0){ // горизонтальный выход из A
+    mx=ex2; my=ey1;
+  } else {                  // вертикальный выход из A
+    mx=ex1; my=ey2;
+  }
+
+  return `M${x1},${y1} L${ex1},${ey1} L${mx},${my} L${ex2},${ey2} L${x2},${y2}`;
 }
 
 function App() {
@@ -519,10 +576,18 @@ function App() {
         </div>}
         {lcs.length>0&&<div>
           <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>СВЯЗИ ПО LIBS ({lcs.length})</div>
-          {lcsShow.map((lc,i)=><div key={i} onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}} style={{fontSize:10,cursor:"pointer",padding:"2px 0",display:"flex",gap:4,alignItems:"center"}}>
-            <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
-            <span style={{color:T.TD,fontSize:8,background:T.BG,padding:"1px 4px",borderRadius:3}}>{lc.lib}</span>
-          </div>)}
+          {lcsShow.map((lc,i)=>(
+  <div key={i} style={{marginBottom:4,borderRadius:4,border:"1px solid "+T.BD,overflow:"hidden"}}>
+    <div onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}}
+      style={{fontSize:10,cursor:"pointer",padding:"3px 6px",display:"flex",gap:4,alignItems:"center",background:T.BG}}>
+      <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
+      <span style={{color:T.TD,fontSize:8,background:T.BD,padding:"1px 4px",borderRadius:3,marginLeft:"auto"}}>{lc.lib}</span>
+    </div>
+    {LINK_FULL_DESC[lc.lib]&&<div style={{fontSize:9,color:T.TD,padding:"3px 6px",lineHeight:"1.5",borderTop:"1px solid "+T.BD}}>
+      {LINK_FULL_DESC[lc.lib]}
+    </div>}
+  </div>
+))}
           {lcs.length>10&&<button onClick={e=>{e.stopPropagation();setShowAllLinks(!showAllLinks);}} style={{marginTop:4,fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid "+T.BD,background:T.BG,color:O,cursor:"pointer"}}>
             {showAllLinks?"Скрыть ↑":"Показать все ("+lcs.length+") ↓"}
           </button>}
@@ -611,15 +676,44 @@ function App() {
               </g>
             );})}
             {/* FIX #3: DB nodes — подсвечиваются только при клике (adb=sDb), не при hover */}
-            {DBS.map(db=>{const p=POS[db.id];if(!p)return null;
-              const lit=(ac&&selCompDbs.has(db.id))||(adb===db.id);
-              return(
-              <g key={db.id} onClick={e=>si(()=>{setSDb(sDb===db.id?null:db.id);setSel(null);setSL(null);setSD(null);},e)} style={{cursor:"pointer"}}>
-                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={lit?db.color+"22":T.CD} stroke={lit?db.color:db.color+"44"} strokeWidth={lit?2.5:1}/>
-                <text x={p.x+6} y={p.y+11} fontSize={8} fontWeight={700} fill={db.color}>{db.n}</text>
-                <text x={p.x+6} y={p.y+21} fontSize={6} fill={T.TD}>{db.sub}</text>
-              </g>
-            );})}
+            {DBS.map(db=>{
+  const p=POS[db.id]; if(!p)return null;
+  const lit=(ac&&selCompDbs.has(db.id))||(adb===db.id);
+  // Если что-то выбрано но этот DB не связан — гасим как бэкенд
+  const dim=!!(
+    (ac&&!selCompDbs.has(db.id)&&adb!==db.id)||
+    (adb&&adb!==db.id)
+  );
+  return(
+    <g key={db.id}
+      onClick={e=>si(()=>{setSDb(sDb===db.id?null:db.id);setSel(null);setSL(null);setSD(null);},e)}
+      style={{cursor:"pointer"}}
+      opacity={dim?0.07:1}>
+      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5}
+        fill={lit?db.color+"22":T.CD}
+        stroke={lit?db.color:db.color+"44"}
+        strokeWidth={lit?2.5:1}/>
+      <text x={p.x+6} y={p.y+11} fontSize={8} fontWeight={700} fill={db.color}>{db.n}</text>
+      <text x={p.x+6} y={p.y+21} fontSize={6} fill={T.TD}>{db.sub}</text>
+    </g>
+  );
+})}
+            {/* Lines — под бэкендами, над слоями */}
+            {svcL.map((l,i)=>(
+              <path key={"s"+i} d={l.d} fill="none"
+                stroke={O+"88"} strokeWidth={1.5} opacity={0.85} strokeDasharray="5,3"
+                style={{pointerEvents:"none"}}/>
+            ))}
+            {dbLines.map((l,i)=>(
+              <path key={"d"+i} d={l.d} fill="none"
+                stroke={l.color} strokeWidth={2} opacity={0.7} strokeDasharray="6,4"
+                style={{pointerEvents:"none"}}/>
+            ))}
+            {dpLines.map((l,i)=>(
+              <path key={"dp"+i} d={l.d} fill="none"
+                stroke={"#4ecdc4"} strokeWidth={1.5} opacity={0.9} strokeDasharray="5,3"
+                style={{pointerEvents:"none"}}/>
+            ))}
             {/* Component rects */}
             {C.map(c=>{const p=POS[c.id];if(!p)return null;
               const isS=sel===c.id,isC=conn.has(c.id),isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id),isDpC=dpConnSet.has(c.id);
@@ -643,41 +737,23 @@ function App() {
                 </g>
               );
             })}
-            {/* FIX #2: линии поверх компонентов, ортогональные L-shape, без тултипов на линиях */}
-            {svcL.map((l,i)=>(
-              <path key={"s"+i} d={l.d} fill="none"
-                stroke={O+"88"} strokeWidth={1.5} opacity={0.85} strokeDasharray="5,3"
-                style={{pointerEvents:"none"}}/>
-            ))}
-            {dbLines.map((l,i)=>(
-              <path key={"d"+i} d={l.d} fill="none"
-                stroke={l.color} strokeWidth={2} opacity={0.7} strokeDasharray="6,4"
-                style={{pointerEvents:"none"}}/>
-            ))}
-            {/* FIX #4: DP-линки — бирюзовый (OS-level протоколы отличаются от lib-imports) */}
-            {dpLines.map((l,i)=>(
-              <path key={"dp"+i} d={l.d} fill="none"
-                stroke={"#4ecdc4"} strokeWidth={1.5} opacity={0.9} strokeDasharray="5,3"
-                style={{pointerEvents:"none"}}/>
-            ))}
             {scLines.map((l,i)=><line key={"sc"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#4ecdc4" strokeWidth={3} opacity={0.8} strokeDasharray="8,4"/>)}
 
             {/* FIX #2: тултипы только на легенде */}
             <g transform={`translate(${LP},${POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500})`}>
               <rect x={0} y={0} width={480} height={18} rx={4} fill={T.CD+"dd"} stroke={T.BD}/>
               {[
-                {c:O+"88",    l:"Lib-связь",   x:6,   tip:"Связи через shared Python-библиотеки (lib-imports).\nПоказывают какие бэкенды используют общий код."},
-                {c:CE,        l:"PERM",         x:68,  tip:DB_LINK_DESC.db_perm},
-                {c:CE2,       l:"RUN",          x:104, tip:DB_LINK_DESC.db_run},
-                {c:CC,        l:"CH",           x:132, tip:DB_LINK_DESC.db_ch},
-                {c:CS,        l:"SQLite",       x:154, tip:"SQLite: AD-кэш (ad-backend), учётки (user-backend), IPS-правила (suricata-backend)"},
-                {c:CR,        l:"RocksDB",      x:196, tip:DB_LINK_DESC.db_rk},
-                {c:"#4ecdc4", l:"DP-протокол",  x:244, tip:"Прямые OS-level связи между daemon'ами Data Plane:\nNFQUEUE, KNI/TPROXY, Unix socket, libecap (in-process),\nring buffer, VRRP/netlink, xauth/EAP."},
-                {c:"#4ecdc4", l:"Сценарий",     x:330, tip:"Текущий активный шаг сценария.\nПошаговая визуализация потока данных."},
+                {c:O+"88",    l:"Lib-связь",   x:6},
+                {c:CE,        l:"PERM",         x:68},
+                {c:CE2,       l:"RUN",          x:104},
+                {c:CC,        l:"CH",           x:132},
+                {c:CS,        l:"SQLite",       x:154},
+                {c:CR,        l:"RocksDB",      x:196},
+                {c:"#4ecdc4", l:"DP-протокол",  x:244},
+                {c:"#4ecdc4", l:"Сценарий",     x:330},
               ].map((x,i)=>(
                 <g key={i} style={{cursor:"help"}}
-                  onMouseEnter={e=>showTTip(e,x.tip)}
-                  onMouseLeave={()=>setTT(null)}>
+                 >
                   <rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/>
                   <text x={x.x+10} y={11} fontSize={6} fill={T.TM}>{x.l}</text>
                 </g>
