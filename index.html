@@ -146,6 +146,41 @@ const DB_LINK_DESC = {
   db_rk:"RocksDB — база URL-категорий контент-фильтра.\n\n145 категорий, миллионы URL. Lookup за микросекунды — критично для inline-фильтрации в eCAP. Обновляется из облака Ideco."
 };
 
+const LEG_DESC = {
+  leg_lib:{
+    title:"Lib-связь (shared Python libraries)",
+    body:"Связь через общие Python-библиотеки — основной механизм взаимодействия бэкендов в Control Plane.\n\nКаждый бэкенд импортирует нужные lib-модули и через них читает/пишет конфигурацию в etcd. Изменение в одном бэкенде автоматически видно другим через etcd watch → react паттерн.\n\nПримеры: alias-lib (объекты МСЭ), auth-lib (сессии), system-lib (настройки сервера), vce-lib (виртуальные контексты)."
+  },
+  leg_perm:{
+    title:"etcd PERMANENT",
+    body:DB_LINK_DESC.db_perm
+  },
+  leg_run:{
+    title:"etcd RUNTIME",
+    body:DB_LINK_DESC.db_run
+  },
+  leg_ch:{
+    title:"ClickHouse",
+    body:DB_LINK_DESC.db_ch
+  },
+  leg_sq:{
+    title:"SQLite (три базы)",
+    body:"SQLite:AD — кэш пользователей и групп Active Directory.\n\n"+DB_LINK_DESC.db_sq_ad+"\n\nSQLite:Users — локальные учётные записи.\n\n"+DB_LINK_DESC.db_sq_usr+"\n\nSQLite:IPS — пользовательские правила Suricata.\n\n"+DB_LINK_DESC.db_sq_ips
+  },
+  leg_rk:{
+    title:"RocksDB",
+    body:DB_LINK_DESC.db_rk
+  },
+  leg_dp:{
+    title:"DP-протокол (OS-level связи)",
+    body:"Прямые связи между daemon'ами Data Plane на уровне ОС — принципиально отличаются от lib-связей (Python imports).\n\nПротоколы:\n— NFQUEUE: передача пакетов из netfilter в userspace daemon (VPP → Suricata, VPP → app-control-nfq)\n— KNI / TPROXY: передача трафика из VPP userspace в Linux kernel stack (VPP → Squid)\n— libecap in-process: вызов модуля внутри процесса Squid без сетевых вызовов (Squid → ecap-av, Squid → ecap-urls)\n— Unix socket: межпроцессное взаимодействие (ecap-av → ClamAV/Kaspersky)\n— IPC / pipe: передача flow-данных между C-процессами (app-control-nfq → flow-stat-server)\n— ring buffer: передача агрегированных данных (flow-stat-server → flow-stat-exporter)\n— xauth / EAP: аутентификация VPN-клиентов (strongSwan → vpn-authd)\n— VRRP / netlink: управление виртуальными IP при переключении кластера (keepalived → FRRouting)"
+  },
+  leg_sc:{
+    title:"Сценарий",
+    body:"Пошаговая визуализация потока данных через компоненты NGFW.\n\nВыбери сценарий в выпадающем списке вверху. Каждый шаг подсвечивает активный компонент и показывает описание происходящего с протоколом взаимодействия.\n\nДоступные сценарии:\n— Авторизация пользователя (captive portal → etcd → ACL)\n— Контент-фильтр (VPP → Squid → RocksDB → ClickHouse)\n— IPS — обнаружение атаки (NFQUEUE → Suricata → ClickHouse)\n— VPN IKEv2 подключение (IKEv2 → xauth → etcd → ESP)\n— Изменение правила МСЭ (UI → etcd → eBPF → ClickHouse)"
+  }
+};
+
 const SCENARIOS = [
   { id:"sc_auth", name:"Авторизация пользователя", steps:[
     { comp:"webauthd",   label:"1. Перехват HTTP",    desc:"iptables REDIRECT перехватывает HTTP неавторизованного пользователя. web-authd отправляет HTTP 302 на страницу captive portal.\n\nПротокол: iptables REDIRECT → HTTP 302" },
@@ -195,71 +230,71 @@ const SCENARIOS = [
 ];
 
 const C = [
-  { id:"web",     n:"web-backend",           s:"Веб-интерфейс",  dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"cabinet", n:"user-cabinet-backend",  s:"Личный кабинет", dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"restapi", n:"rest-api-backend",      s:"REST API",       dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"monitor", n:"monitor-backend",       s:"Мониторинг",     dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp,pysnmp", desc:"",det:[] },
-  { id:"reports", n:"reports-backend",       s:"Отчёты",         dom:"rpt",    sk:"both",    lang:"Python",fw:"clickhouse-driver",desc:"",det:[] },
-  { id:"audit",   n:"audit-backend",         s:"Аудит",          dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"logs",    n:"logs-backend",          s:"Журналы",        dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"servers", n:"servers-backend",       s:"Внешние серверы",dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"auth",    n:"auth-backend",          s:"Аутентификация", dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp,gssapi", desc:"",det:[] },
-  { id:"ad",      n:"ad-backend",            s:"Active Directory",dom:"auth_c",sk:"both",    lang:"Python",fw:"ldap3",          desc:"",det:[] },
-  { id:"ald",     n:"ald-backend",           s:"ALD Pro",        dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"user",    n:"user-backend",          s:"Пользователи",   dom:"auth_c", sk:"both",    lang:"Python",fw:"bcrypt",         desc:"",det:[] },
-  { id:"webauthd",n:"web-authd",             s:"Captive Portal", dom:"auth_c", sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"vpnauthd",n:"vpn-authd",             s:"VPN-аутент.",    dom:"auth_c", sk:"both",    lang:"Python",fw:"daemon",         desc:"",det:[] },
-  { id:"fw",      n:"firewall-backend",      s:"МСЭ",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"nftables",       desc:"",det:[] },
-  { id:"cfw",     n:"cfw-backend",           s:"Custom FW",      dom:"fw_c",   sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"alias",   n:"alias-backend",         s:"Объекты (38+)",  dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"shaper",  n:"shaper-backend",        s:"QoS",            dom:"fw_c",   sk:"classic", lang:"Python",fw:"pyroute2",       desc:"",det:[] },
-  { id:"acl",     n:"acl-backend",           s:"ACL",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"vpp_be",  n:"vpp-backend",           s:"VPP конфиг",     dom:"fw_c",   sk:"vpp",     lang:"Python",fw:"vpp-api",        desc:"",det:[] },
-  { id:"l2",      n:"l2-manager",            s:"L2",             dom:"net_c",  sk:"both",    lang:"Python",fw:"pyroute2",       desc:"",det:[] },
-  { id:"dns_be",  n:"dns-backend",           s:"DNS конфиг",     dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"dhcp_be", n:"dhcp-server-backend",   s:"DHCP конфиг",    dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"web",     n:"web-backend",           s:"Веб-интерфейс",  dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Веб-интерфейс администратора NGFW.\n\nNginx (статика, проксирование) + aiohttp (async API). Полное управление всеми модулями системы.\n\nРолевая модель: суперадминистратор (полный доступ), администратор МСЭ (правила, сеть), администратор ИБ (IPS, AV, CF, WAF), аудитор (только просмотр).\n\n2FA для входа: TOTP, SMS (SMS Aero), Multifactor. Telegram-бот: push-уведомления об IPS-алертах, падении каналов, изменениях конфигурации.",det:["Nginx+aiohttp","2FA","Telegram"] },
+  { id:"cabinet", n:"user-cabinet-backend",  s:"Личный кабинет", dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Личный кабинет пользователя.\n\nПортал самообслуживания — отдельный URL, доступен авторизованным пользователям сети.\n\nСмена пароля учётной записи. Персональная статистика: объём трафика, категории посещённых сайтов, история блокировок контент-фильтра.\n\nСкачивание VPN-профилей для Ideco Client и стандартных клиентов (.ovpn, .mobileconfig, .conf).\n\nSSL VPN портал: доступ к внутренним веб-ресурсам организации прямо из браузера, без установки VPN-клиента.",det:["Пароль","VPN-профили"] },
+  { id:"restapi", n:"rest-api-backend",      s:"REST API",       dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"REST API для внешней автоматизации.\n\nПрограммный интерфейс на основе OpenAPI. Покрывает все функции веб-интерфейса: CRUD правил МСЭ, управление пользователями и группами, VPN-конфигурации, объекты alias, метрики и события.\n\nСценарии: SIEM — получение событий безопасности и автоблокировка IP по IoC. SOAR — автоматическое реагирование на инциденты. DevOps/IaC — конфигурация NGFW как код (Terraform, Ansible).\n\nДоступ через API-ключи. Rate limiting.",det:["OpenAPI","SIEM/SOAR"] },
+  { id:"monitor", n:"monitor-backend",       s:"Мониторинг",     dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp,pysnmp", desc:"Мониторинг состояния NGFW.\n\nСбор системных метрик: CPU (по ядрам), RAM (used/cached/swap), диски (IOPS, usage), сетевые интерфейсы (bps, pps, errors, drops). Метрики записываются в ClickHouse для графиков загруженности за произвольный период.\n\nИнтеграция: Zabbix-agent (push метрик), SNMP v2c/v3 (get/walk/traps для NMS).\n\nHealthcheck всех внутренних сервисов. Проверка репутации IP-адресов и доменов через облачный сервис Ideco.\n\nОповещения (alerts-lib): уведомления при превышении пороговых значений.",det:["Метрики→CH","Zabbix/SNMP"] },
+  { id:"reports", n:"reports-backend",       s:"Отчёты",         dom:"rpt",    sk:"both",    lang:"Python",fw:"clickhouse-driver",desc:"Конструктор отчётов и аналитика.\n\nГотовые шаблоны: журнал МСЭ (accept/drop по правилам), статистика веб-трафика (сайты, категории, пользователи), IPS-алерты (сигнатуры, severity), DPI (приложения, объёмы), загруженность каналов (bps/pps по интерфейсам).\n\nИсточник — ClickHouse с Materialized Views для быстрой агрегации.\n\nЭкспорт: CSV (для анализа), PDF (для руководства). Автоматическая рассылка по email по расписанию.\n\n15+ lib-зависимостей — самый связанный бэкенд, собирает данные из всех доменов.",det:["Конструктор","CSV/PDF"] },
+  { id:"audit",   n:"audit-backend",         s:"Аудит",          dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Журнал действий администраторов.\n\nНередактируемый аудит-лог. Фиксирует: входы/выходы (IP + геолокация через GeoIP), каждое изменение настроек (diff «было → стало» в JSON), создание и удаление правил, изменение ролей.\n\nДанные в ClickHouse, TTL 365 дней. Фильтрация по администратору, типу действия, модулю, периоду.\n\nНеобходим для соответствия требованиям ФСТЭК и ФСБ.",det:["Diff","ФСТЭК"] },
+  { id:"logs",    n:"logs-backend",          s:"Журналы",        dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Централизованный сбор логов.\n\nВсе сервисы NGFW пишут в systemd journal. logs-backend собирает, нормализует в Syslog RFC 5424 и записывает в ClickHouse для хранения и поиска.\n\nОтправка на внешние syslog-серверы: TCP (reliable) и UDP. Формат CEF (Common Event Format) для интеграции с корпоративными SIEM — ArcSight, QRadar, Splunk.\n\nРотация по размеру и времени. Сжатие LZ4 в ClickHouse.",det:["Syslog→CH"] },
+  { id:"servers", n:"servers-backend",       s:"Внешние серверы",dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация внешних серверов.\n\nАдреса внешних сервисов, с которыми взаимодействует NGFW:\n— Syslog-серверы: коллекторы для отправки логов (TCP/UDP, формат RFC 5424, CEF), фильтры по severity\n— NTP-серверы: источники синхронизации времени\n— DNS upstream: серверы для форвардинга DNS-запросов, DoH endpoints\n\nНастройки хранятся в etcd PERMANENT и доступны другим модулям через servers-lib.",det:["Syslog/NTP"] },
+  { id:"auth",    n:"auth-backend",          s:"Аутентификация", dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp,gssapi", desc:"Ядро аутентификации и авторизации.\n\nАвторизация — обязательное условие для доступа пользователя в интернет. Для работы внутри локальной сети авторизация не требуется.\n\nПоддерживает одновременно несколько методов: веб-аутентификация (captive portal), SSO (прозрачная, без ввода пароля), через журналы AD, через Ideco Client, по IP/MAC-адресу, по подсети. 2FA для дополнительной защиты.\n\nСессия авторизации привязана к IP-адресу. У одного пользователя может быть несколько сессий (до 6). Неактивные сессии завершаются по тайм-ауту.\n\n12 lib-зависимостей — самый связанный бэкенд Control Plane.",det:["SSO/NTLM/RADIUS","2FA"] },
+  { id:"ad",      n:"ad-backend",            s:"Active Directory",dom:"auth_c",sk:"both",    lang:"Python",fw:"ldap3",          desc:"Интеграция с Active Directory.\n\nИмпорт пользователей и групп через LDAP/LDAPS. Поддержка нескольких доменов одновременно (мульти-домен). Инкрементальная синхронизация по USN Changed — обновляются только изменённые записи.\n\nKerberos SSO: прозрачная аутентификация через keytab/SPN. NTLM: fallback через Samba winbind.\n\nSQLite кэш: при недоступности контроллера домена пользователи аутентифицируются по кэшированным данным. Обновление: периодически по cron + по событию через etcd watch.",det:["LDAP","Kerberos"] },
+  { id:"ald",     n:"ald-backend",           s:"ALD Pro",        dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Интеграция с ALD Pro и FreeIPA.\n\nИмпорт учётных записей и групп через LDAP. Kerberos SSO для прозрачной аутентификации.\n\nАктуально для организаций на Astra Linux и ALT Linux — импортозамещение в госсекторе и КИИ.",det:["ALD/FreeIPA"] },
+  { id:"user",    n:"user-backend",          s:"Пользователи",   dom:"auth_c", sk:"both",    lang:"Python",fw:"bcrypt",         desc:"Локальные учётные записи.\n\nCRUD пользователей и групп, не связанных с AD/ALD. Квоты трафика: ограничение объёма за период, действие при превышении (блокировка или уведомление).\n\nХранение в SQLite (пароли — bcrypt). Импорт из CSV.",det:["CRUD","SQLite"] },
+  { id:"webauthd",n:"web-authd",             s:"Captive Portal", dom:"auth_c", sk:"classic", lang:"Python",fw:"aiohttp",        desc:"Daemon captive portal.\n\nПерехватывает HTTP-трафик неавторизованных пользователей через iptables REDIRECT и перенаправляет (302) на страницу входа.\n\nПосле успешной аутентификации создаёт сессию через auth-backend.\n\nТолько классический контекст — в высокопроизводительном VCE используется другой механизм перехвата.",det:["iptables"] },
+  { id:"vpnauthd",n:"vpn-authd",             s:"VPN-аутент.",    dom:"auth_c", sk:"both",    lang:"Python",fw:"daemon",         desc:"Аутентификация VPN-клиентов.\n\nВызывается strongSwan (через xauth/eap plugin) при подключении IKEv2/L2TP и OpenVPN (через auth-user-pass-verify).\n\nПроверяет логин/пароль через auth-backend, применяет 2FA если настроено. Возвращает IP-адрес и маршруты для клиента.",det:["xauth/eap"] },
+  { id:"fw",      n:"firewall-backend",      s:"МСЭ",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"nftables",       desc:"Межсетевой экран — основной инструмент управления трафиком.\n\nStateful-фильтрация (Stateful Inspection): решение о блокировке принимается один раз при установлении соединения и действует на весь обмен данными.\n\nЧетыре таблицы правил:\n— FORWARD: фильтрация транзитного трафика между сетями\n— INPUT: трафик к самому NGFW (DNS, VPN, прокси)\n— DNAT: проброс портов, подмена IP/порта назначения\n— SNAT: подмена IP-адреса источника (NAT)\n\nК разрешающим правилам подключаются профили безопасности — контроль приложений (DPI) и предотвращение вторжений (IPS). Фильтрация по зонам (логические объединения интерфейсов, до 64 на зону).\n\n12 lib-зависимостей.",det:["FORWARD/INPUT/DNAT/SNAT"] },
+  { id:"cfw",     n:"cfw-backend",           s:"Custom FW",      dom:"fw_c",   sk:"classic", lang:"Python",fw:"aiohttp",        desc:"Пользовательские правила nftables.\n\nPre-filter: выполняются ДО основного межсетевого экрана. Для нестандартных сценариев, не покрываемых стандартным интерфейсом: GeoIP-блокировка, специфический NAT, интеграция с внешними IDS.\n\nТолько классический контекст.",det:["Pre-filter"] },
+  { id:"alias",   n:"alias-backend",         s:"Объекты (38+)",  dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Объектная модель NGFW — фундамент всех правил.\n\n38+ модулей объектов: IP-адреса, подсети, диапазоны, MAC, FQDN (динамический резолвинг), сервисы (порт/протокол), расписания (временные интервалы), зоны безопасности (LAN/WAN/DMZ — логические группы интерфейсов), алиасы AD/ALD (динамические группы по членству в AD-группах).\n\nОбъекты переиспользуются во всех правилах МСЭ, контент-фильтра, маршрутизации. Изменение объекта автоматически обновляет все правила через etcd watch.\n\nalias-lib импортируют 30+ бэкендов.",det:["38+ модулей"] },
+  { id:"shaper",  n:"shaper-backend",        s:"QoS",            dom:"fw_c",   sk:"classic", lang:"Python",fw:"pyroute2",       desc:"Ограничение скорости входящего интернет-трафика.\n\nLinux Traffic Control (tc), дисциплины HTB/HFSC. Привязка к пользователям, группам, IP-адресам. Гарантированная полоса (rate), максимальная (ceil), приоритет.\n\nТолько классический контекст — в высокопроизводительном VCE используется встроенный VPP policer.",det:["tc"] },
+  { id:"acl",     n:"acl-backend",           s:"ACL",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Трансляция правил МСЭ в ACL для Data Plane.\n\nМост между Control Plane и Data Plane. Наблюдает за изменениями правил МСЭ и объектов alias через etcd watch. При каждом изменении разворачивает alias-объекты в конкретные IP/подсети и загружает ACL в eBPF maps (классический контекст) или VPP ACL plugin (высокопроизводительный).\n\nФиксирует события accept/drop через NFLOG → ClickHouse для журнала МСЭ.",det:["eBPF+VPP ACL"] },
+  { id:"vpp_be",  n:"vpp-backend",           s:"VPP конфиг",     dom:"fw_c",   sk:"vpp",     lang:"Python",fw:"vpp-api",        desc:"Конфигурация VPP (Vector Packet Processing).\n\nУправляет VPP через Python API bindings: настройка интерфейсов, ACL, L2-бриджей. Записывает оперативное состояние интерфейсов (link up/down, скорость, MTU, счётчики) в etcd RUNTIME для отображения в UI.\n\nТолько высокопроизводительный контекст (VCE VPP).",det:["VPP API"] },
+  { id:"l2",      n:"l2-manager",            s:"L2",             dom:"net_c",  sk:"both",    lang:"Python",fw:"pyroute2",       desc:"Управление сетевыми интерфейсами.\n\nТипы: Ethernet (физические порты), VLAN (802.1Q, тегированный трафик), Bond (агрегация каналов — LACP, active-backup), Bridge (L2-мосты).\n\nВ высокопроизводительном режиме создаёт KNI-интерфейсы для связи VPP (userspace) с Linux kernel — они нужны для Suricata, Squid, FRRouting.\n\nИспользует pyroute2 для управления через Netlink API. 7 lib-зависимостей.",det:["Eth/VLAN/Bond"] },
+  { id:"dns_be",  n:"dns-backend",           s:"DNS конфиг",     dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация DNS-сервера Unbound.\n\nDNS преобразует доменные имена в IP-адреса. Встроенный сервер не требует дополнительной настройки в большинстве случаев.\n\nРежимы: рекурсивный резолвер, форвардер (upstream DNS), авторитативный (локальные зоны). Кэширование с prefetch, DNS-over-HTTPS (DoH), DNSSEC.\n\nПользовательские зоны и записи (A/AAAA/CNAME/MX/TXT/SRV). Логирование DNS-запросов → ClickHouse. 8 lib-зависимостей.",det:["DoH/DNSSEC"] },
+  { id:"dhcp_be", n:"dhcp-server-backend",   s:"DHCP конфиг",    dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Обнаружение устройств в сети.\n\nARP-сканирование: рассылка ARP-запросов, сбор ответов для обнаружения активных устройств. OS Fingerprinting: определение типа ОС по TTL, TCP window size, TCP options. MAC OUI: определение производителя по первым 3 байтам MAC-адреса.\n\nРезультаты используются для инвентаризации и обнаружения неавторизованных устройств.",det:["ARP"] },
   { id:"netscan", n:"netscan-backend",       s:"Сканер",         dom:"net_c",  sk:"both",    lang:"Python",fw:"scapy",          desc:"",det:[] },
-  { id:"igmp",    n:"igmpproxy-backend",     s:"IGMP",           dom:"net_c",  sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"cf",      n:"content-filter-backend",s:"Контент-фильтр", dom:"sec_c",  sk:"both",    lang:"Python",fw:"rocksdb",        desc:"",det:[] },
-  { id:"suricata_be",n:"suricata-backend",   s:"IPS конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"av",      n:"av-backend",            s:"AV конфиг",      dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"waf_be",  n:"waf-backend",           s:"WAF конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"proxy_be",n:"proxy-backend",         s:"Прокси конфиг",  dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"reverse", n:"reverse-backend",       s:"Обр.прокси",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"vpnsrv",  n:"vpn-servers-backend",   s:"VPN-серверы",    dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"ipsec",   n:"ipsec-backend",         s:"IPSec s2s",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"gostvpn", n:"gost-vpn-backend",      s:"ГОСТ VPN",       dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"agent",   n:"agent-backend",         s:"Ideco Client",   dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"wg",      n:"wireguard-backend",     s:"WireGuard",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"routing", n:"routing-backend",       s:"Маршрутизация",  dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
-  { id:"mail",    n:"mail-backend",          s:"Почта",          dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"igmp",    n:"igmpproxy-backend",     s:"IGMP",           dom:"net_c",  sk:"classic", lang:"Python",fw:"aiohttp",        desc:"IGMP Proxy — мультикаст-проксирование.\n\nПозволяет принимать мультикаст-трафик от провайдера (IPTV). Транслирует IGMP-подписки (Join/Leave) между upstream (WAN) и downstream (LAN) интерфейсами.\n\nБез этого модуля мультикаст-трафик не проходит через NGFW. Только классический контекст.",det:["IPTV"] },
+  { id:"cf",      n:"content-filter-backend",s:"Контент-фильтр", dom:"sec_c",  sk:"both",    lang:"Python",fw:"rocksdb",        desc:"Контент-фильтр — проверка запрашиваемых URL.\n\nПроверяет сайты по базе URL-адресов из 145 категорий (соцсети, азартные игры, фишинг, порно, экстремизм и др.). Если адрес в запрещённой категории — блокировка со страницей уведомления.\n\nРаботает на прикладном уровне (HTTP/HTTPS). Без расшифровки HTTPS фильтрует только по домену, не по полному URL.\n\nПользовательские категории, переопределение категорий, морфологические словари (фильтрация по ключевым словам). Safe Search для поисковиков.\n\nБаза в RocksDB, обновляется из облака Ideco. 7 lib-зависимостей.",det:["145 кат."] },
+  { id:"suricata_be",n:"suricata-backend",   s:"IPS конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация IPS (Suricata).\n\nУправление правилами предотвращения вторжений: группы сигнатур (ET Open — бесплатные, ET Pro — по подписке, Snort-совместимые), пользовательские сигнатуры.\n\nIPS-профили: наборы параметров, привязываемые к разрешающим правилам МСЭ — разные профили для разных сегментов сети.\n\nАлерты → ClickHouse. Пользовательские правила → SQLite. 9 lib-зависимостей.",det:["ET/Snort"] },
+  { id:"av",      n:"av-backend",            s:"AV конфиг",      dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация антивируса для веб-трафика.\n\nДва движка: Kaspersky Anti-Virus SDK (по лицензии) и ClamAV (бесплатный). Проверка файлов при скачивании через HTTP/HTTPS.\n\nРаботает через eCAP-модуль в Squid (in-process, без ICAP-сервера). 5 lib-зависимостей.",det:["ClamAV/Kaspersky"] },
+  { id:"waf_be",  n:"waf-backend",           s:"WAF конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация WAF (Web Application Firewall).\n\nЗащита опубликованных через обратный прокси веб-ресурсов от атак: SQL-инъекции, XSS, CSRF, Path Traversal (OWASP Top 10).\n\nОснова: ModSecurity + OWASP Core Rule Set. Режимы: prevention (блокировка) и detection (только логирование). WAF-профили привязываются к публикациям в обратном прокси. 4 lib-зависимости.",det:["ModSecurity"] },
+  { id:"proxy_be",n:"proxy-backend",         s:"Прокси конфиг",  dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация прокси-сервера Squid.\n\nПрокси используется не только для проксирования, но и как платформа для контент-фильтра, антивируса и отчётности по веб-трафику.\n\nРежимы: прозрачный (TPROXY — перехват без настройки клиента, достаточно указать NGFW шлюзом) и прямые подключения.\n\nHTTPS-фильтрация: расшифровка TLS-трафика (SSL Bump) — требует установки корневого сертификата NGFW на клиенты. Режимы: bump (полная расшифровка), splice (пропуск), peek (проверка SNI без расшифровки).\n\nICap, WCCP поддержка. 9 lib-зависимостей.",det:["TPROXY/SSL Bump"] },
+  { id:"reverse", n:"reverse-backend",       s:"Обр.прокси",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Обратный прокси — публикация внутренних веб-ресурсов.\n\nПозволяет сделать веб-ресурсы локальной сети доступными из интернета. Nginx reverse proxy с TLS-терминацией.\n\nАвтоматические сертификаты Let's Encrypt (ACME, HTTP-01 challenge) — при наличии доменного имени на статическом белом IP и открытого 80 TCP-порта.\n\nИнтеграция с WAF для защиты публикуемых приложений. 7 lib-зависимостей.",det:["Let's Encrypt"] },
+  { id:"vpnsrv",  n:"vpn-servers-backend",   s:"VPN-серверы",    dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"VPN-серверы для удалённого доступа.\n\nПротоколы: IKEv2/IPSec (нативная поддержка в Windows/macOS/iOS), L2TP/IPSec (совместимость), SSTP (через HTTPS:443, обход блокировок VPN).\n\nАвтогенерация профилей подключения. Правила авторизации определяют, кто может подключаться: по пользователям, группам, группам безопасности AD, LDAP-фильтрам.\n\n11 lib-зависимостей.",det:["5 протоколов"] },
+  { id:"ipsec",   n:"ipsec-backend",         s:"IPSec s2s",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"IPSec site-to-site — туннели между площадками.\n\nЗащищённое соединение двух NGFW или NGFW с оборудованием другого вендора. IKEv1 (совместимость) / IKEv2 (рекомендуемый).\n\nSA: Phase 1 (аутентификация, DH exchange) и Phase 2 (шифрование трафика). DPD (обнаружение падения), PFS (новые ключи для каждой сессии), NAT-T (работа через NAT).\n\n12 lib-зависимостей.",det:["IKEv1/v2"] },
+  { id:"gostvpn", n:"gost-vpn-backend",      s:"ГОСТ VPN",       dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"ГОСТ VPN — соединение двух устройств NGFW.\n\nШифрование по ГОСТ Р 34.12-2015: алгоритмы Кузнечик (128 бит) и Магма (64 бит).\n\nДля организаций КИИ, госорганов и компаний с требованиями ФСБ к криптографии.",det:["ГОСТ"] },
+  { id:"agent",   n:"agent-backend",         s:"Ideco Client",   dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Управление Ideco Client.\n\nФирменный VPN-клиент: установил → подключился в один клик. Push-профили: сервер автоматически отправляет обновлённые настройки. Поддержка Device VPN и профилей устройств для проверки подключаемых устройств.\n\nПлатформы: Windows, macOS, Linux, Android, iOS. 10 lib-зависимостей.",det:["Push"] },
+  { id:"wg",      n:"wireguard-backend",     s:"WireGuard",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Конфигурация WireGuard.\n\nВысокопроизводительный VPN-протокол (kernel-модуль, ~4K строк кода). Современная криптография: Noise Protocol, ChaCha20, Curve25519.\n\nУправление пирами: генерация ключей, настройка allowed IPs. QR-коды для мобильных устройств.",det:["Peers"] },
+  { id:"routing", n:"routing-backend",       s:"Маршрутизация",  dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Маршрутизация через FRRouting.\n\nОпределяет путь каждого пакета. Маршрут ищется последовательно: direct connected → PBR → статические/BGP/OSPF → маршрутизация внешних сетей → балансировка.\n\nPBR: маршрутизация по политикам (по источнику, интерфейсу). BGP: обмен маршрутами с провайдерами. OSPF: динамическая маршрутизация внутри сети.\n\nБалансировка и резервирование: распределение трафика между шлюзами или автопереключение на резервный.\n\nЕсли маршрут найден — пакет передаётся в МСЭ. Результат маршрутизации фиксируется и не изменяется при обработке.\n\n12 lib-зависимостей.",det:["BGP/OSPF"] },
+  { id:"mail",    n:"mail-backend",          s:"Почта",          dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"Почтовый релей.\n\nSMTP relay на Postfix. Используется для email-уведомлений администраторам (IPS-алерты, падение каналов), автоматической рассылки отчётов по расписанию, уведомлений пользователям (истечение квоты, блокировка).\n\nDKIM: цифровая подпись исходящих писем. SPF: публикация DNS-записей для предотвращения подделки отправителя. TLS: шифрование соединений.",det:["Postfix"] },
   // DATA PLANE
-  { id:"vpp_dp",       n:"VPP",               s:"Userspace DP",  dom:"dp_core",sk:"vpp",    lang:"C",  fw:"fd.io/DPDK",     desc:"",det:[] },
-  { id:"unbound_dp",   n:"Unbound",           s:"DNS daemon",    dom:"dp_core",sk:"both",   lang:"C",  fw:"Unbound",        desc:"",det:[] },
-  { id:"dhcpd_dp",     n:"ISC DHCP",          s:"DHCP daemon",   dom:"dp_core",sk:"both",   lang:"C",  fw:"ISC DHCP",       desc:"",det:[] },
-  { id:"suricata_dp",  n:"Suricata",          s:"IPS daemon",    dom:"dp_ips", sk:"both",   lang:"C",  fw:"Suricata",       desc:"",det:[] },
-  { id:"squid_dp",     n:"Squid",             s:"HTTP/S прокси", dom:"dp_ips", sk:"both",   lang:"C++",fw:"Squid/libecap",  desc:"",det:[] },
-  { id:"ecap_av",      n:"ecap-av",           s:"eCAP: AV",      dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap",        desc:"",det:[] },
-  { id:"ecap_urls",    n:"ecap-urls",         s:"eCAP: URL",     dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap/rocksdb",desc:"",det:[] },
-  { id:"modsec_dp",    n:"ModSecurity",       s:"WAF",           dom:"dp_ips", sk:"both",   lang:"C",  fw:"ModSecurity",    desc:"",det:[] },
-  { id:"appctrl",      n:"app-control-nfq",   s:"DPI",           dom:"dp_dpi", sk:"both",   lang:"C++",fw:"nDPI",           desc:"",det:[] },
-  { id:"flowsrv",      n:"flow-stat-server",  s:"DPI-приём",     dom:"dp_dpi", sk:"both",   lang:"C",  fw:"custom",         desc:"",det:[] },
-  { id:"flowexp",      n:"flow-stat-exporter",s:"DPI→CH",        dom:"dp_dpi", sk:"both",   lang:"C++",fw:"clickhouse-cpp", desc:"",det:[] },
-  { id:"trafmond",     n:"trafmond",          s:"Трафик",        dom:"dp_dpi", sk:"both",   lang:"Python",fw:"pyroute2",   desc:"",det:[] },
-  { id:"bpf",          n:"bpf-acl-rules",     s:"eBPF",          dom:"dp_acl", sk:"classic",lang:"C",  fw:"XDP/libbpf",    desc:"",det:[] },
-  { id:"nflog",        n:"ideco-nflog",       s:"NFLOG→CH",      dom:"dp_acl", sk:"both",   lang:"C",  fw:"libnetfilter_log",desc:"",det:[] },
-  { id:"strongswan_dp",n:"strongSwan",        s:"IPSec",         dom:"dp_acl", sk:"both",   lang:"C",  fw:"strongSwan",    desc:"",det:[] },
-  { id:"frr_dp",       n:"FRRouting",         s:"zebra/bgpd",    dom:"dp_acl", sk:"both",   lang:"C",  fw:"FRRouting",     desc:"",det:[] },
-  { id:"keepalived_dp",n:"keepalived",        s:"VRRP",          dom:"dp_acl", sk:"both",   lang:"C",  fw:"keepalived",    desc:"",det:[] },
+  { id:"vpp_dp",       n:"VPP",               s:"Userspace DP",  dom:"dp_core",sk:"vpp",    lang:"C",  fw:"fd.io/DPDK",     desc:"VPP (Vector Packet Processing) — userspace сетевой стек.\n\nЯдро обработки трафика в высокопроизводительном контексте (VCE VPP). Работает в обход ядра Linux, забирая пакеты напрямую с сетевых карт через DPDK (Poll Mode Driver) или AF_XDP.\n\nОбрабатывает пакеты пачками (vectors) через граф узлов: приём → классификация → L2-bridge/L3-route → ACL → NAT → отправка. Это кратно быстрее поштучной обработки.\n\nKNI-интерфейсы связывают VPP с Linux kernel — нужны для Suricata, Squid, FRRouting, которые работают в ядре.",det:["DPDK","Vector"] },
+  { id:"unbound_dp",   n:"Unbound",           s:"DNS daemon",    dom:"dp_core",sk:"both",   lang:"C",  fw:"Unbound",        desc:"Unbound — DNS-сервер (daemon).\n\nОбслуживает DNS-запросы от всех устройств в сети. В большинстве случаев не требует дополнительной настройки.\n\nРежимы: рекурсивный резолвер (полный обход DNS-дерева), форвардер (проксирует на upstream), авторитативный (локальные зоны).\n\nКэширование с prefetch (обновление популярных записей до истечения TTL). DNS-over-HTTPS (DoH) для приватности. DNSSEC для валидации подписей.",det:["Кэш","DoH"] },
+  { id:"dhcpd_dp",     n:"ISC DHCP",          s:"DHCP daemon",   dom:"dp_core",sk:"both",   lang:"C",  fw:"ISC DHCP",       desc:"ISC DHCP — DHCP-сервер (daemon).\n\nАвтоматическая выдача IP-адресов устройствам в локальной сети. Пулы адресов по интерфейсам и VLAN. Статическое резервирование по MAC.\n\nDHCP relay: проксирование запросов между подсетями. Dynamic DNS: автоматическое создание A-записей при выдаче IP.",det:["Пулы"] },
+  { id:"suricata_dp",  n:"Suricata",          s:"IPS daemon",    dom:"dp_ips", sk:"both",   lang:"C",  fw:"Suricata",       desc:"Suricata — IPS daemon (inline).\n\nПолучает трафик через NFQUEUE после L3-обработки в межсетевом экране. Проверяет каждый пакет по базе сигнатур.\n\nВ отличие от МСЭ (решение один раз при установлении соединения), IPS анализирует каждый пакет внутри соединения и может заблокировать на любом этапе.\n\nПри обнаружении атаки: Drop (блокировка пакета) или Alert (фиксация без блокировки). Алерты записываются в ClickHouse.",det:["NFQUEUE"] },
+  { id:"squid_dp",     n:"Squid",             s:"HTTP/S прокси", dom:"dp_ips", sk:"both",   lang:"C++",fw:"Squid/libecap",  desc:"Squid — HTTP/HTTPS прокси-сервер (daemon).\n\nПлатформа для работы модулей безопасности: контент-фильтра, антивируса, отчётности по веб-трафику.\n\nПрозрачный режим (TPROXY): перехват без настройки на клиенте — достаточно указать NGFW шлюзом. SSL Bump: расшифровка HTTPS для полной фильтрации (без расшифровки — только по домену, не по URL).\n\neCAP-модули работают in-process (без ICAP-сервера): антивирус, URL-фильтрация, морфоанализ.",det:["eCAP"] },
+  { id:"ecap_av",      n:"ecap-av",           s:"eCAP: AV",      dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap",        desc:"eCAP-модуль антивирусной проверки.\n\nPlug-in для Squid через libecap (in-process, без сетевых вызовов). При скачивании файла перехватывает HTTP body и отправляет на проверку в ClamAV (clamd) или Kaspersky (klms) через Unix socket.\n\nПри обнаружении угрозы — блокировка загрузки и страница уведомления пользователю.",det:["clamd"] },
+  { id:"ecap_urls",    n:"ecap-urls",         s:"eCAP: URL",     dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap/rocksdb",desc:"eCAP-модуль URL-фильтрации.\n\nПри каждом HTTP/HTTPS запросе извлекает URL и делает lookup в RocksDB — база из 145 категорий, результат за микросекунды. Если категория запрещена для пользователя — блокировка.\n\nНаписан на C++ для inline-производительности: не замедляет проксирование.",det:["RocksDB"] },
+  { id:"modsec_dp",    n:"ModSecurity",       s:"WAF",           dom:"dp_ips", sk:"both",   lang:"C",  fw:"ModSecurity",    desc:"ModSecurity — WAF daemon.\n\nРаботает в связке с Nginx (обратный прокси). Защищает опубликованные веб-ресурсы от атак из OWASP Top 10: SQL-инъекции, XSS, CSRF, Path Traversal, RFI.\n\nOWASP Core Rule Set (CRS). Anomaly scoring: балл аномалии накапливается, блокировка при превышении порога.",det:["CRS"] },
+  { id:"appctrl",      n:"app-control-nfq",   s:"DPI",           dom:"dp_dpi", sk:"both",   lang:"C++",fw:"nDPI",           desc:"DPI — глубокая инспекция пакетов (Контроль приложений).\n\nОпределяет приложение или протокол по содержимому пакетов через nDPI. Распознаёт 300+ приложений: мессенджеры (Telegram, WhatsApp), видео (YouTube, TikTok), торренты (BitTorrent), игры и другие.\n\nПолучает трафик через NFQUEUE. Профили контроля приложений привязываются к разрешающим правилам МСЭ — разные политики для разных сегментов сети.",det:["300+"] },
+  { id:"flowsrv",      n:"flow-stat-server",  s:"DPI-приём",     dom:"dp_dpi", sk:"both",   lang:"C",  fw:"custom",         desc:"Приёмник DPI-статистики.\n\nПринимает flow-данные от app-control-nfq: source/dest IP, порты, приложение, объём трафика (bytes in/out), длительность. Агрегирует в памяти (ring buffer) и передаёт в flow-stat-exporter.",det:["Buffer"] },
+  { id:"flowexp",      n:"flow-stat-exporter",s:"DPI→CH",        dom:"dp_dpi", sk:"both",   lang:"C++",fw:"clickhouse-cpp", desc:"Экспорт DPI-статистики в ClickHouse.\n\nBatch-вставки через clickhouse-cpp для минимизации нагрузки. Буферизация: flush по размеру (1000 записей) или таймауту (5 секунд). Таблица: flow_stats.",det:["Batch"] },
+  { id:"trafmond",     n:"trafmond",          s:"Трафик",        dom:"dp_dpi", sk:"both",   lang:"Python",fw:"pyroute2",   desc:"Мониторинг соединений в реальном времени.\n\nЧитает conntrack — таблицу всех активных NAT/stateful-соединений через NGFW. Кэширует DNS-ответы для обогащения: чтобы в интерфейсе показывать не только IP, но и имена сайтов.\n\nДанные отображаются в разделе Мониторинг веб-интерфейса.",det:["conntrack"] },
+  { id:"bpf",          n:"bpf-acl-rules",     s:"eBPF",          dom:"dp_acl", sk:"classic",lang:"C",  fw:"XDP/libbpf",    desc:"eBPF / XDP — высокоскоростная фильтрация.\n\neBPF-программа загружается в драйвер сетевой карты и обрабатывает пакеты ДО сетевого стека Linux — фильтрация на аппаратной скорости (миллионы pps).\n\nACL-правила загружаются из acl-backend в eBPF maps (hash, LPM trie). Компилируется через LLVM, загружается через libbpf.\n\nТолько классический контекст — в VCE VPP фильтрация через VPP ACL plugin.",det:["XDP"] },
+  { id:"nflog",        n:"ideco-nflog",       s:"NFLOG→CH",      dom:"dp_acl", sk:"both",   lang:"C",  fw:"libnetfilter_log",desc:"Захват событий межсетевого экрана.\n\nПри срабатывании правила МСЭ (accept или drop) netfilter отправляет информацию о пакете через NFLOG target. ideco-nflog перехватывает через libnetfilter_log и записывает в ClickHouse (таблица raw_traffic_journal).\n\nДанные: timestamp, src/dst IP/port, протокол, ID правила, действие. Используется для журнала МСЭ и отчётов.",det:["accept/drop"] },
+  { id:"strongswan_dp",n:"strongSwan",        s:"IPSec",         dom:"dp_acl", sk:"both",   lang:"C",  fw:"strongSwan",    desc:"strongSwan — IPSec/IKEv2 VPN daemon (charon).\n\nУстанавливает и обслуживает шифрованные VPN-туннели: удалённый доступ пользователей (IKEv2, L2TP/IPSec) и site-to-site соединения между площадками.\n\nАутентификация VPN-клиентов через vpn-authd (xauth/eap plugin). Конфигурация туннелей из vpn-servers-backend и ipsec-backend через etcd.",det:["charon"] },
+  { id:"frr_dp",       n:"FRRouting",         s:"zebra/bgpd",    dom:"dp_acl", sk:"both",   lang:"C",  fw:"FRRouting",     desc:"FRRouting — daemon'ы маршрутизации.\n\nzebra: ядро — управляет таблицей маршрутизации Linux. bgpd: обмен маршрутами с провайдерами и другими площадками по BGP. ospfd: динамическая маршрутизация внутри сети по OSPF.\n\nКонфигурация из routing-backend через etcd.",det:["zebra"] },
+  { id:"keepalived_dp",n:"keepalived",        s:"VRRP",          dom:"dp_acl", sk:"both",   lang:"C",  fw:"keepalived",    desc:"keepalived — VRRP daemon для HA-кластера.\n\nОбеспечивает отказоустойчивость Active-Passive. Master отправляет heartbeat (multicast), при пропуске — Standby забирает виртуальные IP и становится активным.\n\nВремя переключения — несколько секунд. Конфигурация из cluster-backend через etcd.",det:["VRRP"] },
   // INFRA
-  { id:"system",  n:"system-backend",   s:"Ядро",        dom:"sys_i",sk:"both",lang:"Python",fw:"psutil",   desc:"",det:[] },
-  { id:"license", n:"license-backend",  s:"Лицензии",    dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
-  { id:"backup",  n:"backup-backend",   s:"Бэкапы",      dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
-  { id:"sysupd",  n:"sysupdate-backend",s:"Обновления",  dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
-  { id:"cert",    n:"cert-backend",     s:"PKI",          dom:"sys_i",sk:"both",lang:"Python",fw:"pyOpenSSL",desc:"",det:[] },
-  { id:"vce",     n:"vce-backend",      s:"VCE",          dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
-  { id:"cc",      n:"central-console",  s:"Ideco Center", dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
-  { id:"cluster", n:"cluster-backend",  s:"Кластер",      dom:"ha_i", sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] }
+  { id:"system",  n:"system-backend",   s:"Ядро",        dom:"sys_i",sk:"both",lang:"Python",fw:"psutil",   desc:"Ядро системы — базовые настройки сервера.\n\nЧасовой пояс, язык интерфейса. Администраторы: создание локальных, интеграция из AD/ALD Pro/RADIUS. Роли: суперадминистратор, администратор МСЭ, администратор ИБ, аудитор.\n\nТерминал: диагностика прямо из браузера (shell). Мониторинг здоровья: CPU, RAM, диски — при превышении пороговых значений уведомление и запись в логи.\n\nGeoIP: геолокация IP-адресов для аудита и правил. system-lib импортируют 20+ бэкендов.",det:["system-lib: 20+"] },
+  { id:"license", n:"license-backend",  s:"Лицензии",    dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"Лицензирование NGFW.\n\nПривязка лицензии к серверу (онлайн или офлайн). Лицензия определяет: максимальное количество одновременно авторизованных пользователей, доступность модулей (IPS по подписке ET Pro, антивирус Kaspersky, обновления контент-фильтра).\n\nЛицензия общая между системным контекстом и всеми VCE. Без подписки: IPS работает с бесплатными ET Open, антивирус — только ClamAV.",det:["Подписки"] },
+  { id:"backup",  n:"backup-backend",   s:"Бэкапы",      dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"Резервное копирование конфигурации.\n\nБэкап: сохранение всех настроек (etcd dump + конфигурационные файлы) в архив tar.gz. По расписанию (cron) или вручную.\n\nВосстановление: полный restore конфигурации из бэкапа. Откат: при обновлении автоматически создаётся бэкап для возврата к предыдущей версии.\n\nВажно: бэкап системного контекста не включает данные дочерних VCE — для каждого VCE нужен отдельный бэкап.",det:["etcd dump"] },
+  { id:"sysupd",  n:"sysupdate-backend",s:"Обновления",  dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"Обновления NGFW.\n\nТипы: ОС (RPM-пакеты), ядро Linux (патчи безопасности), базы IPS (ET Open/Pro), базы антивируса (ClamAV/Kaspersky), базы контент-фильтра (URL-категории), GeoIP.\n\nАвтоматическое обновление по расписанию. Обновления скачиваются с серверов Ideco. Перед обновлением автоматически создаётся бэкап.",det:["RPM"] },
+  { id:"cert",    n:"cert-backend",     s:"PKI",          dom:"sys_i",sk:"both",lang:"Python",fw:"pyOpenSSL",desc:"PKI — центр сертификации NGFW.\n\nПри первом запуске автоматически генерирует корневой самоподписанный сертификат. Для каждого модуля (обратный прокси, VPN IKEv2/SSTP, веб-интерфейс, веб-аутентификация, почта) автоматически создаётся цепочка сертификатов.\n\nПараллельно пытается получить сертификат Let's Encrypt (ACME, HTTP-01 challenge) — при успехе заменяет самоподписанный. Сертификаты Let's Encrypt выпускаются на 3 месяца и перевыпускаются автоматически.\n\nМожно загрузить собственные сертификаты (корневые или на конкретный домен). CRL/OCSP для отзыва.",det:["CA"] },
+  { id:"vce",     n:"vce-backend",      s:"VCE",          dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"VCE — виртуальные контексты NGFW.\n\nСоздание виртуальных серверов (контекстов) на одном физическом NGFW. Реализовано на базе контейнеров Linux (systemd-nspawn). Позволяет разделить одну сеть на несколько независимых — каждая со своими правилами, пользователями, политиками безопасности.\n\nДва типа: Классический (VCE NGFW, мин. 8 ГБ RAM + 2 ядра) и Высокопроизводительный (VCE VPP, мин. 8 ГБ RAM + 4 ядра, обработка через VPP).\n\nКонтексты изолированы по CPU и памяти. Интерфейсы и зоны настраиваются из системного контекста. Это не Multitenancy.\n\nvce-lib импортируют 35+ бэкендов.",det:["vce-lib: 35+"] },
+  { id:"cc",      n:"central-console",  s:"Ideco Center", dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"Ideco Center — централизованное управление парком NGFW.\n\nУправление несколькими устройствами NGFW из одного интерфейса. Шаблоны политик: создание набора правил и применение на все или выбранные устройства.\n\nМониторинг состояния всех NGFW в реальном времени. Актуально для организаций и провайдеров с несколькими NGFW.",det:["Парк"] },
+  { id:"cluster", n:"cluster-backend",  s:"Кластер",      dom:"ha_i", sk:"both",lang:"Python",fw:"aiohttp",  desc:"Кластеризация — отказоустойчивый кластер из двух серверов NGFW.\n\nРежим Active-Passive: Master обрабатывает весь трафик, Standby — в горячем резерве. При отказе Master (heartbeat VRRP через keepalived) Standby автоматически забирает виртуальные IP.\n\nКонфигурация синхронизируется между нодами через etcd. Ручное переключение для планового обслуживания.\n\nВажно: кластеризация недоступна внутри VCE — только на уровне системного контекста.",det:["VRRP"] }
 ];
 
 const DBS = [
@@ -347,45 +382,55 @@ function getDpLinks(id){return DP_LINKS.filter(l=>l.from===id||l.to===id);}
 // FIX #2: ортогональный путь между двумя прямоугольниками
 // Выходим от ближайшей стороны, делаем одно колено (L-shape)
 function orthoPts(ax,ay,aw,ah, bx,by,bw,bh) {
+  const overlapX=(ax<bx+bw)&&(ax+aw>bx);
+  const overlapY=(ay<by+bh)&&(ay+ah>by);
   const aCx=ax+aw/2, aCy=ay+ah/2;
   const bCx=bx+bw/2, bCy=by+bh/2;
-  const STUB=10; // длина перпендикулярного отрезка от рамки
-  let x1,y1,ex1,ey1, x2,y2,ex2,ey2;
 
-  // Определяем лучшую сторону выхода из A и входа в B
-  // на основе относительного положения центров
-  const dx=bCx-aCx, dy=bCy-aCy;
-  const adx=Math.abs(dx), ady=Math.abs(dy);
+  if(overlapX && !overlapY) {
+    // Одна колонка — Z через горизонтальный коридор между блоками
+    const isATop=ay<by;
+    const gap=isATop ? ay+ah+(by-(ay+ah))/2 : by+bh+(ay-(by+bh))/2;
+    const x1=aCx, y1=isATop?ay+ah:ay;
+    const x2=bCx, y2=isATop?by:by+bh;
+    return `M${x1},${y1} L${x1},${gap} L${x2},${gap} L${x2},${y2}`;
+  }
 
-  // Сторона выхода из A
-  if(adx>=ady){
-    if(dx>0){ x1=ax+aw; y1=aCy; ex1=x1+STUB; ey1=y1; }
-    else     { x1=ax;    y1=aCy; ex1=x1-STUB; ey1=y1; }
+  if(overlapY && !overlapX) {
+    // Одна строка — горизонтальный участок вести через верхний или нижний край блоков
+    // Выходим вертикально вниз (или вверх) за пределы блока, потом горизонталь, потом заходим
+    const isALeft=ax<bx;
+    // Коридор — идём ниже обоих блоков (безопаснее чем сквозь них)
+    const bottomA=ay+ah, bottomB=by+bh;
+    const corridor=Math.max(bottomA,bottomB)+4; // 4px ниже нижнего из двух
+    const x1=aCx, y1=ay+ah;
+    const x2=bCx, y2=by+bh;
+    // Если A левее B — можно попробовать короткий путь справа от A до B
+    // Но надёжнее — снизу
+    return `M${aCx},${ay+ah} L${aCx},${corridor} L${bCx},${corridor} L${bCx},${by+bh}`;
+  }
+
+  // Общий случай — блоки по диагонали
+  // Вертикальный коридор — между колонками (зазор CG=5)
+  // Горизонтальный коридор — между строками (зазор RG=3), берём уровень между блоками
+  const isALeft=ax+aw<=bx || ax<bx;
+  const isATop=ay+ah<=by || ay<by;
+
+  if(Math.abs(bCx-aCx)>=Math.abs(bCy-aCy)) {
+    // Доминирует горизонталь: выходим горизонтально, колено по вертикали
+    // Вертикальный коридор между колонками
+    const corridorX=isALeft ? ax+aw+(bx-(ax+aw))/2 : bx+bw+(ax-(bx+bw))/2;
+    const x1=isALeft?ax+aw:ax, y1=aCy;
+    const x2=isALeft?bx:bx+bw, y2=bCy;
+    return `M${x1},${y1} L${corridorX},${y1} L${corridorX},${y2} L${x2},${y2}`;
   } else {
-    if(dy>0){ x1=aCx; y1=ay+ah; ex1=x1; ey1=y1+STUB; }
-    else     { x1=aCx; y1=ay;    ex1=x1; ey1=y1-STUB; }
+    // Доминирует вертикаль: выходим вертикально, колено по горизонтали
+    // Горизонтальный коридор между строками
+    const corridorY=isATop ? ay+ah+(by-(ay+ah))/2 : by+bh+(ay-(by+bh))/2;
+    const x1=aCx, y1=isATop?ay+ah:ay;
+    const x2=bCx, y2=isATop?by:by+bh;
+    return `M${x1},${y1} L${x1},${corridorY} L${x2},${corridorY} L${x2},${y2}`;
   }
-
-  // Сторона входа в B (противоположная логика)
-  if(adx>=ady){
-    if(dx>0){ x2=bx;    y2=bCy; ex2=x2-STUB; ey2=y2; }
-    else     { x2=bx+bw; y2=bCy; ex2=x2+STUB; ey2=y2; }
-  } else {
-    if(dy>0){ x2=bCx; y2=by;    ex2=x2; ey2=y2-STUB; }
-    else     { x2=bCx; y2=by+bh; ex2=x2; ey2=y2+STUB; }
-  }
-
-  // Средняя точка для излома — перпендикулярное колено
-  // Горизонтальный выход: идём горизонтально до x2, потом вертикально
-  // Вертикальный выход: идём вертикально до y2, потом горизонтально
-  let mx,my;
-  if(Math.abs(ex1-x1)>0){ // горизонтальный выход из A
-    mx=ex2; my=ey1;
-  } else {                  // вертикальный выход из A
-    mx=ex1; my=ey2;
-  }
-
-  return `M${x1},${y1} L${ex1},${ey1} L${mx},${my} L${ex2},${ey2} L${x2},${y2}`;
 }
 
 function App() {
@@ -410,6 +455,7 @@ function App() {
   const [teamHL,setTeamHL]=useState(null);
   const [showAllLinks,setShowAllLinks]=useState(false);
   const [undoStack,setUndoStack]=useState([]);
+  const [legSel,setLegSel]=useState(null);
 
   const ac=sel;
   // FIX #3: убрали hDb — hover не подсвечивает хранилища
@@ -461,51 +507,32 @@ function App() {
 
   // FIX #2: ортогональные линии lib-связей
   const svcL=useMemo(()=>{
-    if(!ac)return[];
-    const fp=POS[ac]; if(!fp)return[];
-    return Array.from(conn).map(cid=>{
-      const tp=POS[cid]; if(!tp)return null;
-      const libs=getLibsBtw(ac,cid);
-      return{
-        d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
-        proto:libs.map(l=>LINK_DESC[l]||l).join(", ")
-      };
-    }).filter(Boolean);
-  },[ac,conn]);
+  if(!ac)return[];
+  const fp=POS[ac]; if(!fp)return[];
+  return Array.from(conn).map(cid=>{
+    const tp=POS[cid]; if(!tp)return null;
+    const libs=getLibsBtw(ac,cid);
+    return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,color:O+"77",desc:libs.map(l=>LINK_DESC[l]||l).join("\n")};
+  }).filter(Boolean);
+},[ac,conn]);
 
   // FIX #2: ортогональные линии к хранилищам
   const dbLines=useMemo(()=>{
-    if(ac){
-      const fp=POS[ac]; if(!fp)return[];
-      return DBS.filter(db=>getDbC(db.id).includes(ac)).map(db=>{
-        const tp=POS[db.id]; if(!tp)return null;
-        return{ d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h), color:db.color, did:db.id };
-      }).filter(Boolean);
-    }
-    if(adb){
-      const dp=POS[adb]; if(!dp)return[];
-      const db2=DBS.find(d=>d.id===adb); if(!db2)return[];
-      return getDbC(adb).map(cid=>{
-        const cp=POS[cid]; if(!cp)return null;
-        return{ d:orthoPts(cp.x,cp.y,cp.w,cp.h, dp.x,dp.y,dp.w,dp.h), color:db2.color, did:adb };
-      }).filter(Boolean);
-    }
+    if(ac){const fp=POS[ac];if(!fp)return[];const r=[];DBS.forEach(db=>{if(getDbC(db.id).includes(ac)){const p=POS[db.id];if(p)r.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p.x,y2:p.y+p.h/2,color:db.color,did:db.id});}});return r;}
+    if(adb){const dp=POS[adb];if(!dp)return[];const db2=DBS.find(d=>d.id===adb);if(!db2)return[];return getDbC(adb).map(cid=>{const cp=POS[cid];if(!cp)return null;return{x1:cp.x+cp.w,y1:cp.y+cp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:db2.color,did:adb};}).filter(Boolean);}
     return[];
   },[ac,adb]);
 
   // FIX #2+#4: DP-линки тоже ортогональные, цвет бирюзовый (OS-level протоколы)
   const dpLines=useMemo(()=>{
-    if(!ac)return[];
-    const fp=POS[ac]; if(!fp)return[];
-    return getDpLinks(ac).map(lk=>{
-      const otherId=lk.from===ac?lk.to:lk.from;
-      const tp=POS[otherId]; if(!tp)return null;
-      return{
-        d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
-        proto:lk.proto, desc:lk.desc
-      };
-    }).filter(Boolean);
-  },[ac]);
+  if(!ac)return[];
+  const fp=POS[ac]; if(!fp)return[];
+  return getDpLinks(ac).map(lk=>{
+    const otherId=lk.from===ac?lk.to:lk.from;
+    const tp=POS[otherId]; if(!tp)return null;
+    return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,proto:lk.proto,desc:lk.desc};
+  }).filter(Boolean);
+},[ac]);
 
   const onW=useCallback(e=>{
     e.preventDefault();
@@ -521,7 +548,7 @@ function App() {
   const onMM=useCallback(e=>{if(panning&&ps.current){if(Math.abs(e.clientX-ps.current.x-pan.x)>3||Math.abs(e.clientY-ps.current.y-pan.y)>3)dd.current=true;setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});}},[panning,pan]);
   const onMU=useCallback(()=>{setPanning(false);ps.current=null;},[]);
 
-  function clr(){if(!dd.current){setSel(null);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setShowAllLinks(false);}}
+  function clr(){if(!dd.current){setSel(null);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setShowAllLinks(false);setLegSel(null);}}
   function si(fn,e){e.stopPropagation();if(!dd.current)fn();}
   function showTTip(e,t){if(!t)return;const r=svgRef.current.getBoundingClientRect();setTT({x:e.clientX-r.left+14,y:e.clientY-r.top-10,text:t});}
   function doUndo(){if(!undoStack.length)return;setTeams(undoStack[undoStack.length-1]);setUndoStack(s=>s.slice(0,-1));}
@@ -552,7 +579,7 @@ function App() {
           {" · "}<span style={{color:T.TD}}>Lib: </span><span style={{color:T.TX}}>{selC.fw}</span>
           {" · "}<span style={{color:T.TD}}>Режим: </span><span style={{color:SC[selC.sk]}}>{SL[selC.sk]}</span>
         </div>
-        {selC.det&&selC.det.length>0&&<div style={{marginBottom:10}}>{selC.det.map((d,i)=><div key={i} style={{fontSize:11,color:T.TX}}>· {d}</div>)}</div>}
+        
         {dpL.length>0&&<div style={{marginBottom:10}}>
           <div style={{fontSize:9,color:"#4ecdc4",fontWeight:700,marginBottom:3}}>DP-ВЗАИМОДЕЙСТВИЕ ({dpL.length})</div>
           {dpL.map((lk,i)=>{
@@ -577,15 +604,12 @@ function App() {
         {lcs.length>0&&<div>
           <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>СВЯЗИ ПО LIBS ({lcs.length})</div>
           {lcsShow.map((lc,i)=>(
-  <div key={i} style={{marginBottom:4,borderRadius:4,border:"1px solid "+T.BD,overflow:"hidden"}}>
-    <div onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}}
-      style={{fontSize:10,cursor:"pointer",padding:"3px 6px",display:"flex",gap:4,alignItems:"center",background:T.BG}}>
-      <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
-      <span style={{color:T.TD,fontSize:8,background:T.BD,padding:"1px 4px",borderRadius:3,marginLeft:"auto"}}>{lc.lib}</span>
-    </div>
-    {LINK_FULL_DESC[lc.lib]&&<div style={{fontSize:9,color:T.TD,padding:"3px 6px",lineHeight:"1.5",borderTop:"1px solid "+T.BD}}>
-      {LINK_FULL_DESC[lc.lib]}
-    </div>}
+  <div key={i} onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}}
+    style={{fontSize:10,cursor:"pointer",padding:"3px 6px",marginBottom:2,
+      display:"flex",gap:4,alignItems:"center",borderRadius:4,
+      border:"1px solid "+T.BD,background:T.BG}}>
+    <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
+    <span style={{color:T.TD,fontSize:8,background:T.BD+"88",padding:"1px 4px",borderRadius:3,marginLeft:"auto"}}>{lc.lib}</span>
   </div>
 ))}
           {lcs.length>10&&<button onClick={e=>{e.stopPropagation();setShowAllLinks(!showAllLinks);}} style={{marginTop:4,fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid "+T.BD,background:T.BG,color:O,cursor:"pointer"}}>
@@ -622,6 +646,12 @@ function App() {
       <div style={{marginTop:10}}>{C.filter(c=>c.dom===sD).map(c=><div key={c.id} onClick={()=>{setSel(c.id);setSD(null);}} style={{padding:"3px 6px",borderRadius:4,cursor:"pointer",background:T.BG,marginBottom:2,border:"1px solid "+T.BD,fontSize:10}}>
         <span style={{color:T.TX,fontFamily:"monospace"}}>{c.n}</span> <span style={{color:SC[c.sk],fontSize:8}}>{SL[c.sk]}</span>
       </div>)}</div>
+    </div>;
+  }
+  if(!side&&legSel&&LEG_DESC[legSel]){
+    side=<div style={{padding:14}}>
+      <h2 style={{fontSize:16,color:O,marginBottom:8}}>{LEG_DESC[legSel].title}</h2>
+      <p style={{fontSize:12,color:T.TX,lineHeight:"1.7",whiteSpace:"pre-line"}}>{LEG_DESC[legSel].body}</p>
     </div>;
   }
   const showSB=side!==null;
@@ -668,7 +698,7 @@ function App() {
               <rect x={POS.INFRA.x} y={POS.INFRA.y} width={POS.INFRA.w} height={POS.INFRA.h} rx={10} fill={O3+"08"} stroke={O3+"33"} strokeWidth={1.5} strokeDasharray="10,5"/>
               <text x={POS.INFRA.x+8} y={POS.INFRA.y+18} fontSize={12} fontWeight={800} fill={O3} letterSpacing="1.5">INFRASTRUCTURE</text>
             </g>}
-            {/* Domain backgrounds */}
+        {/* Lines — под бэкендами, над слоями */}
             {Object.keys(DOMS).map(dk=>{const dv=DOMS[dk],p=POS["D_"+dk];if(!p)return null;return(
               <g key={dk} onClick={e=>si(()=>{setSD(dk);setSel(null);setSL(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
                 <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={6} fill={T.CD} stroke={dv.c+"30"}/>
@@ -681,8 +711,8 @@ function App() {
   const lit=(ac&&selCompDbs.has(db.id))||(adb===db.id);
   // Если что-то выбрано но этот DB не связан — гасим как бэкенд
   const dim=!!(
-    (ac&&!selCompDbs.has(db.id)&&adb!==db.id)||
-    (adb&&adb!==db.id)
+    (ac && !selCompDbs.has(db.id) && adb!==db.id) ||
+    (adb && adb!==db.id && !ac)
   );
   return(
     <g key={db.id}
@@ -698,66 +728,87 @@ function App() {
     </g>
   );
 })}
-            {/* Lines — под бэкендами, над слоями */}
-            {svcL.map((l,i)=>(
-              <path key={"s"+i} d={l.d} fill="none"
-                stroke={O+"88"} strokeWidth={1.5} opacity={0.85} strokeDasharray="5,3"
-                style={{pointerEvents:"none"}}/>
-            ))}
-            {dbLines.map((l,i)=>(
-              <path key={"d"+i} d={l.d} fill="none"
-                stroke={l.color} strokeWidth={2} opacity={0.7} strokeDasharray="6,4"
-                style={{pointerEvents:"none"}}/>
-            ))}
-            {dpLines.map((l,i)=>(
-              <path key={"dp"+i} d={l.d} fill="none"
-                stroke={"#4ecdc4"} strokeWidth={1.5} opacity={0.9} strokeDasharray="5,3"
-                style={{pointerEvents:"none"}}/>
-            ))}
-            {/* Component rects */}
-            {C.map(c=>{const p=POS[c.id];if(!p)return null;
-              const isS=sel===c.id,isC=conn.has(c.id),isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id),isDpC=dpConnSet.has(c.id);
-              const hc=isDbC&&activeDbColor?activeDbColor:null;
-              const tid=compTeamMap[c.id];const tc=tid?TCOL[tid]:null;
-              const dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
-              const scDim=scenario&&!isSc,tDim=teamHL&&!isTHL;
-              const fillC=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
-              const strC=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
-              const strW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
-              const txC=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
-              return(
-                <g key={c.id} onClick={e=>si(()=>{setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e)} style={{cursor:"pointer"}} opacity={dim||scDim||tDim?0.07:1}>
-                  {tc&&<rect x={p.x} y={p.y} width={4} height={p.h} rx={2} fill={tc} opacity={0.8}/>}
-                  <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={fillC} stroke={strC} strokeWidth={strW}/>
-                  <text x={p.x+8} y={p.y+14} fontSize={9} fontWeight={700} fill={txC}>{c.n}</text>
-                  <text x={p.x+8} y={p.y+25} fontSize={7} fill={T.TD}>{c.s}</text>
-                  <rect x={p.x+p.w-34} y={p.y+2} width={32} height={10} rx={3} fill={SC[c.sk]+"22"} stroke={SC[c.sk]+"44"} strokeWidth={0.5}/>
-                  <text x={p.x+p.w-18} y={p.y+10} fontSize={6} fontWeight={700} fill={SC[c.sk]} textAnchor="middle">{SL[c.sk]}</text>
-                  {isScCur&&<text x={p.x+p.w/2} y={p.y-4} fontSize={10} fontWeight={800} fill="#4ecdc4" textAnchor="middle">▼</text>}
-                </g>
-              );
-            })}
-            {scLines.map((l,i)=><line key={"sc"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#4ecdc4" strokeWidth={3} opacity={0.8} strokeDasharray="8,4"/>)}
+{/* Lines + scLines */}
+{svcL.map((l,i)=><line key={"s"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2} opacity={.6} strokeDasharray="5,3" onMouseEnter={e=>showTTip(e,l.desc)} onMouseLeave={()=>setTT(null)} style={{cursor:"help",pointerEvents:"stroke"}}/>)}
+{dbLines.map((l,i)=><line key={"d"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2.5} opacity={.5} strokeDasharray="6,4" filter="url(#gl)" onMouseEnter={e=>showTTip(e,DB_LINK_DESC[l.did]||"")} onMouseLeave={()=>setTT(null)} style={{cursor:"help",pointerEvents:"stroke"}}/>)}
+{dpLines.map((l,i)=><line key={"dp"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={"#4ecdc4"} strokeWidth={1.5} opacity={0.9} strokeDasharray="5,3" style={{pointerEvents:"none"}}/>)}
+{scLines.map((l,i)=><line key={"sc"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#4ecdc4" strokeWidth={3} opacity={0.8} strokeDasharray="8,4"/>)}
 
-            {/* FIX #2: тултипы только на легенде */}
+{/* Component rects — неактивные */}
+{C.map(c=>{
+  const p=POS[c.id]; if(!p)return null;
+  const isS=sel===c.id,isC=conn.has(c.id),isDpC=dpConnSet.has(c.id);
+  const isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id);
+  if(isS||isC||isDpC||isDbC)return null;
+  const hc=isDbC&&activeDbColor?activeDbColor:null;
+  const tid=compTeamMap[c.id];const tc=tid?TCOL[tid]:null;
+  const dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
+  const scDim=scenario&&!isSc,tDim=teamHL&&!isTHL;
+  const fillC=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
+  const strC=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
+  const strW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
+  const txC=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
+  return(
+    <g key={c.id} onClick={e=>si(()=>{setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e)} style={{cursor:"pointer"}} opacity={dim||scDim||tDim?0.07:1}>
+      {tc&&<rect x={p.x} y={p.y} width={4} height={p.h} rx={2} fill={tc} opacity={0.8}/>}
+      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={fillC} stroke={strC} strokeWidth={strW}/>
+      <text x={p.x+8} y={p.y+14} fontSize={9} fontWeight={700} fill={txC}>{c.n}</text>
+      <text x={p.x+8} y={p.y+25} fontSize={7} fill={T.TD}>{c.s}</text>
+      <rect x={p.x+p.w-34} y={p.y+2} width={32} height={10} rx={3} fill={SC[c.sk]+"22"} stroke={SC[c.sk]+"44"} strokeWidth={0.5}/>
+      <text x={p.x+p.w-18} y={p.y+10} fontSize={6} fontWeight={700} fill={SC[c.sk]} textAnchor="middle">{SL[c.sk]}</text>
+      {isScCur&&<text x={p.x+p.w/2} y={p.y-4} fontSize={10} fontWeight={800} fill="#4ecdc4" textAnchor="middle">▼</text>}
+    </g>
+  );
+})}
+
+{/* Component rects — активные */}
+{C.map(c=>{
+  const p=POS[c.id]; if(!p)return null;
+  const isS=sel===c.id,isC=conn.has(c.id),isDpC=dpConnSet.has(c.id);
+  const isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id);
+  if(!isS&&!isC&&!isDpC&&!isDbC)return null;
+  const hc=isDbC&&activeDbColor?activeDbColor:null;
+  const tid=compTeamMap[c.id];const tc=tid?TCOL[tid]:null;
+  const dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
+  const scDim=scenario&&!isSc,tDim=teamHL&&!isTHL;
+  const fillC=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
+  const strC=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
+  const strW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
+  const txC=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
+  return(
+    <g key={c.id} onClick={e=>si(()=>{setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e)} style={{cursor:"pointer"}} opacity={dim||scDim||tDim?0.07:1}>
+      {tc&&<rect x={p.x} y={p.y} width={4} height={p.h} rx={2} fill={tc} opacity={0.8}/>}
+      <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={fillC} stroke={strC} strokeWidth={strW}/>
+      <text x={p.x+8} y={p.y+14} fontSize={9} fontWeight={700} fill={txC}>{c.n}</text>
+      <text x={p.x+8} y={p.y+25} fontSize={7} fill={T.TD}>{c.s}</text>
+      <rect x={p.x+p.w-34} y={p.y+2} width={32} height={10} rx={3} fill={SC[c.sk]+"22"} stroke={SC[c.sk]+"44"} strokeWidth={0.5}/>
+      <text x={p.x+p.w-18} y={p.y+10} fontSize={6} fontWeight={700} fill={SC[c.sk]} textAnchor="middle">{SL[c.sk]}</text>
+      {isScCur&&<text x={p.x+p.w/2} y={p.y-4} fontSize={10} fontWeight={800} fill="#4ecdc4" textAnchor="middle">▼</text>}
+    </g>
+  );
+})}
+
+{/* FIX #2: тултипы только на легенде */}
             <g transform={`translate(${LP},${POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500})`}>
               <rect x={0} y={0} width={480} height={18} rx={4} fill={T.CD+"dd"} stroke={T.BD}/>
               {[
-                {c:O+"88",    l:"Lib-связь",   x:6},
-                {c:CE,        l:"PERM",         x:68},
-                {c:CE2,       l:"RUN",          x:104},
-                {c:CC,        l:"CH",           x:132},
-                {c:CS,        l:"SQLite",       x:154},
-                {c:CR,        l:"RocksDB",      x:196},
-                {c:"#4ecdc4", l:"DP-протокол",  x:244},
-                {c:"#4ecdc4", l:"Сценарий",     x:330},
-              ].map((x,i)=>(
-                <g key={i} style={{cursor:"help"}}
-                 >
-                  <rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/>
-                  <text x={x.x+10} y={11} fontSize={6} fill={T.TM}>{x.l}</text>
-                </g>
-              ))}
+  {c:O+"88",    l:"Lib-связь",   x:6,   id:"leg_lib"},
+  {c:CE,        l:"PERM",        x:68,  id:"leg_perm"},
+  {c:CE2,       l:"RUN",         x:104, id:"leg_run"},
+  {c:CC,        l:"CH",          x:132, id:"leg_ch"},
+  {c:CS,        l:"SQLite",      x:154, id:"leg_sq"},
+  {c:CR,        l:"RocksDB",     x:196, id:"leg_rk"},
+  {c:"#4ecdc4", l:"DP-протокол", x:244, id:"leg_dp"},
+  {c:"#4ecdc4", l:"Сценарий",    x:330, id:"leg_sc"},
+].map((x,i)=>(
+  <g key={i} style={{cursor:"pointer"}}
+    onClick={e=>si(()=>setLegSel(x.id),e)}>
+    <rect x={x.x} y={0} width={60} height={18} fill="transparent"/>
+    <rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/>
+    <text x={x.x+10} y={11} fontSize={6} fill={T.TM}
+      style={{textDecoration:legSel===x.id?"underline":"none"}}>{x.l}</text>
+  </g>
+))}
             </g>
           </g>
         </svg>
