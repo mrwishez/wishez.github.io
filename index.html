@@ -1,10 +1,28 @@
-// ============================================================
-// ПАТЧ для index.html — применяй блок за блоком
-// ============================================================
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
-// ── 1. DOMS — единый цвет O для всех доменов ────────────────
-// Замени весь const DOMS = { ... }; на:
+const THEMES = {
+  dark:  { BG:"#0e0d20", CD:"#161530", BD:"#2d2856", TX:"#E1EAF9", TM:"#9b9abb", TD:"#6a6890" },
+  light: { BG:"#f5f3f0", CD:"#ffffff", BD:"#d8d4ce", TX:"#1a1a2e", TM:"#5a5870", TD:"#8a8898" }
+};
+const O="#FF5A1A", Ob="#E77C06", O2="#ff7a4a", O3="#ff9a6a", O4="#cc4815";
+const CE="#4a9ec8", CE2="#3a7ea0", CC="#e05a2a", CS="#9a7ac0", CS2="#7a5aa0", CS3="#b490d0", CR="#c89030";
+const SC = { classic:"#5a8aaf", vpp:"#d06040", both:"#8a8aaa" };
+const SL = { classic:"Classic", vpp:"VPP", both:"Both" };
+const TCOL = { t_net:"#2196F3", t_fw:"#F44336", t_sec:"#FF9800", t_auth:"#9C27B0", t_vpn:"#009688", t_mon:"#795548", t_plat:"#607D8B", t_ui:"#E91E63", t_perf:"#3F51B5" };
 
+const LAYERS = [
+  { id:"mgmt", label:"MANAGEMENT PLANE", desc:"UI, API, отчёты, аудит", color:O2 },
+  { id:"ctrl", label:"CONTROL PLANE",    desc:"Конфигурация: файрвол, аутентификация, сеть, безопасность, VPN", color:O3 },
+  { id:"data", label:"DATA PLANE",       desc:"Обработка трафика: VPP, eBPF, Suricata, Squid, DPI", color:O }
+];
+const LAYER_DESC = {
+  mgmt:"Уровень управления и наблюдаемости.\n\nЕдинственная точка взаимодействия администратора и внешних систем с NGFW. Компоненты не участвуют в обработке трафика — читают конфигурацию из etcd, записывают изменения обратно в etcd, визуализируют аналитику из ClickHouse.",
+  ctrl:"Уровень конфигурации и бизнес-логики.\n\nОпределяет правила игры: что фильтровать, кого пускать, куда маршрутизировать. Бэкенды принимают настройки от Management Plane, проверяют и записывают в etcd. Data Plane наблюдает за изменениями через watch и автоматически применяет конфигурацию.",
+  data:"Уровень обработки трафика.\n\nКаждый пакет обрабатывается здесь. Daemon'ы ОС (Suricata, Squid, Unbound, strongSwan, FRRouting) и высокопроизводительные C/C++ компоненты (VPP, eBPF, eCAP, nDPI).\n\nТри стадии:\n1. Предварительная — eBPF/XDP, QoS\n2. МСЭ — DNAT, INPUT, FORWARD, IPS, DPI\n3. Завершающая — SNAT, VPN-шифрование",
+  infra:"Инфраструктурный уровень — фундамент системы.\n\nЛицензирование, обновления, резервное копирование, сертификаты, VCE, кластеризация и хранилища данных."
+};
+
+// FIX #6: единый цвет O для всех доменов
 const DOMS = {
   ui:     { l:"Веб-интерфейс",  ly:"mgmt", c:O },
   rpt:    { l:"Отчёты",         ly:"mgmt", c:O },
@@ -23,172 +41,676 @@ const DOMS = {
   ha_i:   { l:"HA",             ly:"infra",c:O },
   db_i:   { l:"Хранилища",      ly:"infra",c:O }
 };
+const DOM_DESC = {
+  ui:"Веб-интерфейс администратора (web-backend) — Nginx + aiohttp. Ролевая модель: суперадминистратор, администратор МСЭ, ИБ, аудитор. 2FA: TOTP, SMS, Multifactor.\n\nЛичный кабинет пользователя (user-cabinet-backend) — портал самообслуживания: смена пароля, VPN-профили, SSL VPN портал.",
+  rpt:"REST API (rest-api-backend) — OpenAPI, SIEM/SOAR/IaC интеграции.\n\nМониторинг (monitor-backend) — CPU/RAM/диски/интерфейсы → ClickHouse. Zabbix-agent, SNMP v2c/v3.",
+  api_d:"Отчёты (reports-backend) — конструктор из ClickHouse. CSV/PDF, авторассылка.\n\nАудит (audit-backend) — diff «было→стало» в JSON, TTL 365 дней, ФСТЭК/ФСБ.\n\nЖурналы (logs-backend) — systemd journal → ClickHouse, Syslog RFC5424, CEF.",
+  auth_c:"auth-backend: captive portal, SSO Kerberos/NTLM, IP/MAC, 2FA.\nad-backend: LDAP/LDAPS, Kerberos, NTLM, SQLite-кэш.\nald-backend: ALD Pro, FreeIPA.\nuser-backend: локальные учётки, bcrypt.\nweb-authd: iptables REDIRECT → captive portal.",
+  fw_c:"firewall-backend: Stateful Inspection, FORWARD/INPUT/DNAT/SNAT, профили безопасности, зоны.\nalias-backend: 38+ типов объектов, alias-lib импортируют 30+ бэкендов.\nacl-backend: трансляция МСЭ → eBPF maps / VPP ACL.\nvpp-backend: конфигурация VPP через Python API.",
+  net_c:"l2-manager: Ethernet, VLAN 802.1Q, Bond (LACP), Bridge, KNI.\ndns-backend: Unbound — рекурсивный, форвардер, DoH, DNSSEC.\ndhcp-server-backend: пулы, резервирование MAC, DHCP relay.\nnetscan-backend: ARP-сканирование, OS fingerprinting.",
+  sec_c:"content-filter-backend: 145 категорий URL (RocksDB).\nsuricata-backend: ET Open/Pro, Snort, IPS-профили.\nav-backend: ClamAV / Kaspersky SDK.\nwaf-backend: ModSecurity + OWASP CRS.\nproxy-backend: Squid TPROXY / SSL Bump.\nreverse-backend: Nginx обратный прокси, Let's Encrypt.",
+  vpn_c:"vpn-servers-backend: IKEv2/IPSec, L2TP/IPSec, SSTP.\nipsec-backend: site-to-site, IKEv1/v2, DPD, PFS, NAT-T.\ngost-vpn-backend: ГОСТ Р 34.12-2015.\nagent-backend: Ideco Client, push-профили.\nwireguard-backend: WireGuard, QR-коды.",
+  rt_c:"routing-backend: FRRouting — PBR, статика, BGP, OSPF, балансировка каналов.\nmail-backend: Postfix SMTP relay, DKIM, SPF, TLS.",
+  dp_core:"VPP: userspace сетевой стек (DPDK/AF_XDP), пакеты пачками, KNI → Suricata/Squid/FRRouting.\nUnbound: DNS daemon — рекурсивный/форвардер, кэш, DoH, DNSSEC.\nISC DHCP: DHCP daemon — пулы, MAC-резервирование, relay.",
+  dp_ips:"Suricata: IPS inline (NFQUEUE), ET Open/Pro, Drop/Alert → ClickHouse.\nSquid: HTTP/S прокси (TPROXY), SSL Bump, платформа для eCAP.\necap-av: антивирус in-process (ClamAV/Kaspersky через Unix socket).\necap-urls: URL lookup в RocksDB in-process.\nModSecurity: WAF в связке с Nginx.",
+  dp_dpi:"app-control-nfq: nDPI, 300+ приложений, NFQUEUE → flow-stat-server.\nflow-stat-server: ring buffer агрегации.\nflow-stat-exporter: batch insert в ClickHouse.\ntrafmond: conntrack + DNS-обогащение.",
+  dp_acl:"bpf-acl-rules: eBPF/XDP до сетевого стека, eBPF maps (hash, LPM).\nideco-nflog: NFLOG (libnetfilter_log) → ClickHouse.\nstrongSwan: charon, IKEv2/L2TP, site-to-site.\nFRRouting: zebra/bgpd/ospfd.\nkeepalived: VRRP, Active-Passive heartbeat."
+};
 
+const DP_LINKS = [
+  { from:"vpp_dp",       to:"suricata_dp",  proto:"NFQUEUE",         desc:"VPP передаёт пакеты с IPS-профилем через NFQUEUE в Suricata для L7-инспекции" },
+  { from:"vpp_dp",       to:"squid_dp",     proto:"KNI / TPROXY",    desc:"VPP передаёт HTTP/S трафик в Squid через KNI-интерфейс (TPROXY)" },
+  { from:"vpp_dp",       to:"appctrl",      proto:"NFQUEUE",         desc:"VPP передаёт трафик в app-control-nfq через NFQUEUE для DPI (nDPI)" },
+  { from:"vpp_dp",       to:"nflog",        proto:"NFLOG (netlink)", desc:"netfilter отправляет события accept/drop через NFLOG target → ideco-nflog" },
+  { from:"squid_dp",     to:"ecap_av",      proto:"libecap in-proc", desc:"Squid вызывает ecap-av in-process через libecap при скачивании файла" },
+  { from:"squid_dp",     to:"ecap_urls",    proto:"libecap in-proc", desc:"Squid вызывает ecap-urls in-process через libecap при каждом HTTP/S запросе" },
+  { from:"ecap_av",      to:"suricata_dp",  proto:"Unix socket",     desc:"ecap-av отправляет файлы на проверку в ClamAV/Kaspersky через Unix socket (clamd)" },
+  { from:"appctrl",      to:"flowsrv",      proto:"IPC / pipe",      desc:"app-control-nfq передаёт flow-данные (src/dst, приложение, объём) в flow-stat-server" },
+  { from:"flowsrv",      to:"flowexp",      proto:"ring buffer",     desc:"flow-stat-server агрегирует данные в ring buffer → flow-stat-exporter batch insert" },
+  { from:"strongswan_dp",to:"vpnauthd",     proto:"xauth / EAP",    desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin при подключении IKEv2/L2TP" },
+  { from:"keepalived_dp",to:"frr_dp",       proto:"VRRP / netlink", desc:"keepalived управляет виртуальными IP, FRRouting обновляет таблицы маршрутизации" }
+];
 
-// ── 2. Убрать hover-подсветку хранилищ (adb = только клик) ──
-// Найди строку:
-//   const adb=sDb||hDb;
-// Замени на:
-const adb=sDb;
+const DB_PERM = ["system","alias","fw","auth","web","reports","monitor","routing","dns_be","dhcp_be","proxy_be","cf","suricata_be","av","waf_be","reverse","cert","vpnsrv","ipsec","gostvpn","agent","user","ad","ald","audit","license","backup","cluster","sysupd","mail","vce","cc","restapi","cabinet","cfw","shaper","netscan","igmp","acl","vpp_be","l2","logs","servers","wg","unbound_dp","dhcpd_dp","strongswan_dp","frr_dp","keepalived_dp"];
+const DB_RUN  = ["vpp_be","l2","acl","cluster","auth","system","monitor","fw","routing","dhcp_be","dns_be","suricata_be","proxy_be","vpnsrv","ipsec","cf","vpp_dp","unbound_dp","strongswan_dp","frr_dp","keepalived_dp"];
+const DB_CH   = ["web","cabinet","monitor","reports","audit","logs","auth","suricata_be","waf_be","acl","nflog","vpp_be","flowexp","cc","suricata_dp","appctrl"];
+const DB_SQ_AD  = ["ad"];
+const DB_SQ_USR = ["user"];
+const DB_SQ_IPS = ["suricata_be","suricata_dp"];
+const DB_RK     = ["cf","ecap_urls"];
 
-// Найди: const [hDb,setHDb]=useState(null);
-// Можно оставить (используется в JSX), но строки
-//   onMouseEnter={()=>setHDb(db.id)} onMouseLeave={()=>setHDb(null)}
-// у DBS.map — удали оба атрибута.
+const LINK_DESC = { alias:"Объекты",auth:"Аутент.",cert:"Серт.",cluster:"Кластер",license:"Лицензии",vce:"VCE",system:"Системные",firewall:"Правила МСЭ",routing:"Маршруты",l2manager:"Интерфейсы",proxy:"Прокси","content-filter":"URL",av:"AV",reports:"Отчёты",alerts:"Алерты","inet-access":"Доступ","ad-users":"AD",sessions:"Сессии","vpn-servers":"VPN",agent:"Client",ipsec:"IPSec","gost-vpn":"ГОСТ","dhcp-server":"DHCP",suricata:"IPS",waf:"WAF",servers:"Серверы","vpn-authd":"VPN auth",vpp:"VPP" };
+const DB_LINK_DESC = {
+  db_perm:"etcd PERMANENT — постоянная конфигурация NGFW.\n\nПравила МСЭ, объекты alias, настройки модулей, учётные записи. Сохраняется при перезагрузке.\n\nПаттерн взаимодействия: write → watch → react. Бэкенды общаются через etcd, не напрямую.",
+  db_run: "etcd RUNTIME — оперативные данные.\n\nПересоздаётся при старте: link up/down, скорость интерфейсов, MTU, активные сессии авторизации, статусы бэкендов, текущие VPN-соединения.",
+  db_ch:  "ClickHouse — колоночная СУБД для аналитики и логов.\n\nЖурнал МСЭ (accept/drop), DNS-запросы, IPS-алерты, WAF-события, DPI-статистика, веб-трафик по пользователям. 14+ бэкендов пишут данные.",
+  db_sq_ad:"SQLite: AD cache.\n\nКэш пользователей и групп Active Directory. Аутентификация при недоступности DC. Инкрементальная синхронизация по USN Changed.",
+  db_sq_usr:"SQLite: Users — локальные учётные записи.\n\nПользователи и группы без AD/ALD. Пароли в bcrypt. Квоты трафика.",
+  db_sq_ips:"SQLite: IPS rules — пользовательские правила IPS.\n\nSnort-совместимые сигнатуры из suricata-backend. Загружаются Suricata наравне с ET Open/Pro.",
+  db_rk:"RocksDB — база URL-категорий контент-фильтра.\n\n145 категорий, миллионы URL. Lookup за микросекунды — критично для inline-фильтрации в eCAP. Обновляется из облака Ideco."
+};
 
+const SCENARIOS = [
+  { id:"sc_auth", name:"Авторизация пользователя", steps:[
+    { comp:"webauthd",   label:"1. Перехват HTTP",    desc:"iptables REDIRECT перехватывает HTTP неавторизованного пользователя. web-authd отправляет HTTP 302 на страницу captive portal.\n\nПротокол: iptables REDIRECT → HTTP 302" },
+    { comp:"auth",       label:"2. Аутентификация",   desc:"Пользователь вводит логин/пароль. auth-backend проверяет метод: captive portal, SSO Kerberos, IP/MAC, Ideco Client.\n\nПротокол: HTTP POST → auth-backend (aiohttp)" },
+    { comp:"ad",         label:"3. Проверка в AD",    desc:"ad-backend проверяет учётные данные через LDAP/LDAPS. При недоступности AD — использует SQLite-кэш.\n\nПротокол: LDAP/LDAPS 389/636 → контроллер домена" },
+    { comp:"db_sq_ad",   label:"4. SQLite кэш",       desc:"Кэш пользователей и групп AD. При недоступности DC аутентификация проходит по кэшированным данным.\n\nТип: SQLite (ad-backend)" },
+    { comp:"db_run",     label:"5. Сессия в etcd",    desc:"auth-backend создаёт запись в etcd RUNTIME: IP ↔ пользователь ↔ группы. Сессия видна всем компонентам.\n\nПротокол: etcd put (gRPC)" },
+    { comp:"fw",         label:"6. Правила МСЭ",      desc:"firewall-backend читает правила FORWARD для пользователя/группы из etcd PERMANENT.\n\nПротокол: etcd get/watch (gRPC)" },
+    { comp:"acl",        label:"7. Загрузка ACL",     desc:"acl-backend транслирует правила в eBPF maps (классический) или VPP ACL plugin (VPP). Пакеты пользователя пропускаются.\n\nПротокол: bpf() syscall / VPP API" }
+  ]},
+  { id:"sc_cf", name:"Контент-фильтр (URL)", steps:[
+    { comp:"vpp_dp",   label:"1. Пакет → Squid",    desc:"VPP направляет HTTP/S трафик в Squid через KNI и TPROXY.\n\nПротокол: KNI / TPROXY (Linux networking)" },
+    { comp:"squid_dp", label:"2. Squid принимает",  desc:"Squid в прозрачном режиме. Для HTTPS — SSL Bump (TLS MITM) для получения полного URL.\n\nПротокол: HTTP CONNECT / SSL Bump" },
+    { comp:"ecap_urls",label:"3. eCAP URL lookup",  desc:"Squid вызывает ecap-urls in-process через libecap. Lookup в RocksDB.\n\nПротокол: libecap (in-process, C++)" },
+    { comp:"db_rk",    label:"4. RocksDB lookup",   desc:"145 категорий, миллионы URL. Lookup за микросекунды: URL/домен → ID категории.\n\nТип: embedded RocksDB" },
+    { comp:"cf",       label:"5. Проверка профиля", desc:"content-filter-backend: какие категории запрещены для каких групп.\n\nПротокол: etcd read (PERMANENT)" },
+    { comp:"squid_dp", label:"6. Блок или пропуск", desc:"Запрещена → HTTP 403 со страницей блокировки. Разрешена → proxy forward.\n\nПротокол: HTTP 403 / HTTP proxy forward" },
+    { comp:"db_ch",    label:"7. Лог в ClickHouse", desc:"Событие (URL, пользователь, категория, действие) → ClickHouse.\n\nПротокол: clickhouse-driver TCP, batch insert" }
+  ]},
+  { id:"sc_ips", name:"IPS — обнаружение атаки", steps:[
+    { comp:"vpp_dp",      label:"1. Пакет → NFQUEUE",      desc:"Трафик с разрешающим правилом + IPS-профиль → NFQUEUE.\n\nПротокол: netfilter NFQUEUE target" },
+    { comp:"suricata_dp", label:"2. Suricata инспектирует", desc:"Suricata проверяет каждый пакет по сигнатурам ET Open/Pro.\n\nПротокол: NFQUEUE → libnetfilter_queue" },
+    { comp:"suricata_be", label:"3. Профили из etcd",       desc:"suricata-backend хранит IPS-профили в etcd. Suricata читает через watch.\n\nПротокол: etcd watch/get (gRPC)" },
+    { comp:"db_sq_ips",   label:"4. Пользовательские правила", desc:"Кастомные Snort-совместимые сигнатуры из SQLite.\n\nТип: SQLite (suricata-backend)" },
+    { comp:"suricata_dp", label:"5. Вердикт Drop/Alert",   desc:"Drop → NF_DROP (блокировка). Alert → NF_ACCEPT + событие.\n\nПротокол: NFQUEUE verdict" },
+    { comp:"db_ch",       label:"6. Алерт → ClickHouse",   desc:"IPS-алерт (сигнатура, severity, src/dst, timestamp) → ClickHouse.\n\nПротокол: clickhouse-driver, batch insert" },
+    { comp:"reports",     label:"7. Отчёт в UI",           desc:"reports-backend читает алерты из ClickHouse → веб-интерфейс.\n\nПротокол: ClickHouse SQL → HTTP JSON → браузер" }
+  ]},
+  { id:"sc_vpn", name:"VPN IKEv2 подключение", steps:[
+    { comp:"strongswan_dp",label:"1. IKE_SA_INIT",        desc:"Клиент инициирует IKEv2 handshake. charon выполняет Diffie-Hellman.\n\nПротокол: IKEv2 (UDP 500 / 4500)" },
+    { comp:"vpnauthd",     label:"2. Аутентификация",     desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin.\n\nПротокол: xauth / EAP-MSCHAPv2" },
+    { comp:"auth",         label:"3. Проверка через auth", desc:"vpn-authd → auth-backend. Проверка учётных данных, 2FA.\n\nПротокол: HTTP internal API (aiohttp)" },
+    { comp:"vpnsrv",       label:"4. VPN конфигурация",   desc:"vpn-servers-backend: пул IP, маршруты для клиента, DNS.\n\nПротокол: etcd read (PERMANENT)" },
+    { comp:"db_perm",      label:"5. Данные из etcd",     desc:"strongSwan читает конфигурацию туннелей из etcd при старте и через watch.\n\nПротокол: etcd watch/get (gRPC)" },
+    { comp:"strongswan_dp",label:"6. CHILD_SA установлен",desc:"Установлена IPSec SA для шифрования. Клиент получает IP из пула.\n\nПротокол: IKEv2 CREATE_CHILD_SA → ESP (IP proto 50)" },
+    { comp:"db_run",       label:"7. Сессия в RUNTIME",   desc:"Активное VPN-соединение записывается в etcd RUNTIME.\n\nПротокол: etcd put (gRPC)" }
+  ]},
+  { id:"sc_rule", name:"Изменение правила МСЭ", steps:[
+    { comp:"web",    label:"1. Создание в UI",        desc:"Администратор создаёт правило. web-backend валидирует данные.\n\nПротокол: HTTP POST → Nginx → web-backend (aiohttp)" },
+    { comp:"fw",     label:"2. Валидация",            desc:"firewall-backend проверяет объекты alias и профили безопасности.\n\nПротокол: etcd read (PERMANENT)" },
+    { comp:"db_perm",label:"3. Запись в etcd",        desc:"Правило сохраняется в etcd PERMANENT. Все подписчики (watch) уведомляются.\n\nПротокол: etcd put (gRPC, MVCC)" },
+    { comp:"acl",    label:"4. ACL watch → реакция",  desc:"acl-backend через etcd watch разворачивает alias → пересчитывает ACL.\n\nПротокол: etcd watch stream (gRPC)" },
+    { comp:"bpf",    label:"5. Загрузка в eBPF",      desc:"acl-backend загружает ACL в eBPF maps (hash map / LPM trie).\n\nПротокол: bpf() syscall → eBPF maps" },
+    { comp:"nflog",  label:"6. NFLOG → ClickHouse",   desc:"ideco-nflog перехватывает accept/drop через libnetfilter_log → ClickHouse.\n\nПротокол: NFLOG netlink → libnetfilter_log → ClickHouse TCP" },
+    { comp:"audit",  label:"7. Запись в аудит",       desc:"audit-backend: кто/когда/что изменил, diff «было → стало» JSON → ClickHouse.\n\nПротокол: etcd watch → ClickHouse insert" }
+  ]}
+];
 
-// ── 3. Плейсхолдер поиска ────────────────────────────────────
-// Найди: placeholder="🔍 Поиск по имени/описанию..."
-// Замени на:
-//   placeholder="🔍 Поиск..."
+const C = [
+  { id:"web",     n:"web-backend",           s:"Веб-интерфейс",  dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"cabinet", n:"user-cabinet-backend",  s:"Личный кабинет", dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"restapi", n:"rest-api-backend",      s:"REST API",       dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"monitor", n:"monitor-backend",       s:"Мониторинг",     dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp,pysnmp", desc:"",det:[] },
+  { id:"reports", n:"reports-backend",       s:"Отчёты",         dom:"rpt",    sk:"both",    lang:"Python",fw:"clickhouse-driver",desc:"",det:[] },
+  { id:"audit",   n:"audit-backend",         s:"Аудит",          dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"logs",    n:"logs-backend",          s:"Журналы",        dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"servers", n:"servers-backend",       s:"Внешние серверы",dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"auth",    n:"auth-backend",          s:"Аутентификация", dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp,gssapi", desc:"",det:[] },
+  { id:"ad",      n:"ad-backend",            s:"Active Directory",dom:"auth_c",sk:"both",    lang:"Python",fw:"ldap3",          desc:"",det:[] },
+  { id:"ald",     n:"ald-backend",           s:"ALD Pro",        dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"user",    n:"user-backend",          s:"Пользователи",   dom:"auth_c", sk:"both",    lang:"Python",fw:"bcrypt",         desc:"",det:[] },
+  { id:"webauthd",n:"web-authd",             s:"Captive Portal", dom:"auth_c", sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"vpnauthd",n:"vpn-authd",             s:"VPN-аутент.",    dom:"auth_c", sk:"both",    lang:"Python",fw:"daemon",         desc:"",det:[] },
+  { id:"fw",      n:"firewall-backend",      s:"МСЭ",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"nftables",       desc:"",det:[] },
+  { id:"cfw",     n:"cfw-backend",           s:"Custom FW",      dom:"fw_c",   sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"alias",   n:"alias-backend",         s:"Объекты (38+)",  dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"shaper",  n:"shaper-backend",        s:"QoS",            dom:"fw_c",   sk:"classic", lang:"Python",fw:"pyroute2",       desc:"",det:[] },
+  { id:"acl",     n:"acl-backend",           s:"ACL",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"vpp_be",  n:"vpp-backend",           s:"VPP конфиг",     dom:"fw_c",   sk:"vpp",     lang:"Python",fw:"vpp-api",        desc:"",det:[] },
+  { id:"l2",      n:"l2-manager",            s:"L2",             dom:"net_c",  sk:"both",    lang:"Python",fw:"pyroute2",       desc:"",det:[] },
+  { id:"dns_be",  n:"dns-backend",           s:"DNS конфиг",     dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"dhcp_be", n:"dhcp-server-backend",   s:"DHCP конфиг",    dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"netscan", n:"netscan-backend",       s:"Сканер",         dom:"net_c",  sk:"both",    lang:"Python",fw:"scapy",          desc:"",det:[] },
+  { id:"igmp",    n:"igmpproxy-backend",     s:"IGMP",           dom:"net_c",  sk:"classic", lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"cf",      n:"content-filter-backend",s:"Контент-фильтр", dom:"sec_c",  sk:"both",    lang:"Python",fw:"rocksdb",        desc:"",det:[] },
+  { id:"suricata_be",n:"suricata-backend",   s:"IPS конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"av",      n:"av-backend",            s:"AV конфиг",      dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"waf_be",  n:"waf-backend",           s:"WAF конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"proxy_be",n:"proxy-backend",         s:"Прокси конфиг",  dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"reverse", n:"reverse-backend",       s:"Обр.прокси",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"vpnsrv",  n:"vpn-servers-backend",   s:"VPN-серверы",    dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"ipsec",   n:"ipsec-backend",         s:"IPSec s2s",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"gostvpn", n:"gost-vpn-backend",      s:"ГОСТ VPN",       dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"agent",   n:"agent-backend",         s:"Ideco Client",   dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"wg",      n:"wireguard-backend",     s:"WireGuard",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"routing", n:"routing-backend",       s:"Маршрутизация",  dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  { id:"mail",    n:"mail-backend",          s:"Почта",          dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",        desc:"",det:[] },
+  // DATA PLANE
+  { id:"vpp_dp",       n:"VPP",               s:"Userspace DP",  dom:"dp_core",sk:"vpp",    lang:"C",  fw:"fd.io/DPDK",     desc:"",det:[] },
+  { id:"unbound_dp",   n:"Unbound",           s:"DNS daemon",    dom:"dp_core",sk:"both",   lang:"C",  fw:"Unbound",        desc:"",det:[] },
+  { id:"dhcpd_dp",     n:"ISC DHCP",          s:"DHCP daemon",   dom:"dp_core",sk:"both",   lang:"C",  fw:"ISC DHCP",       desc:"",det:[] },
+  { id:"suricata_dp",  n:"Suricata",          s:"IPS daemon",    dom:"dp_ips", sk:"both",   lang:"C",  fw:"Suricata",       desc:"",det:[] },
+  { id:"squid_dp",     n:"Squid",             s:"HTTP/S прокси", dom:"dp_ips", sk:"both",   lang:"C++",fw:"Squid/libecap",  desc:"",det:[] },
+  { id:"ecap_av",      n:"ecap-av",           s:"eCAP: AV",      dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap",        desc:"",det:[] },
+  { id:"ecap_urls",    n:"ecap-urls",         s:"eCAP: URL",     dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap/rocksdb",desc:"",det:[] },
+  { id:"modsec_dp",    n:"ModSecurity",       s:"WAF",           dom:"dp_ips", sk:"both",   lang:"C",  fw:"ModSecurity",    desc:"",det:[] },
+  { id:"appctrl",      n:"app-control-nfq",   s:"DPI",           dom:"dp_dpi", sk:"both",   lang:"C++",fw:"nDPI",           desc:"",det:[] },
+  { id:"flowsrv",      n:"flow-stat-server",  s:"DPI-приём",     dom:"dp_dpi", sk:"both",   lang:"C",  fw:"custom",         desc:"",det:[] },
+  { id:"flowexp",      n:"flow-stat-exporter",s:"DPI→CH",        dom:"dp_dpi", sk:"both",   lang:"C++",fw:"clickhouse-cpp", desc:"",det:[] },
+  { id:"trafmond",     n:"trafmond",          s:"Трафик",        dom:"dp_dpi", sk:"both",   lang:"Python",fw:"pyroute2",   desc:"",det:[] },
+  { id:"bpf",          n:"bpf-acl-rules",     s:"eBPF",          dom:"dp_acl", sk:"classic",lang:"C",  fw:"XDP/libbpf",    desc:"",det:[] },
+  { id:"nflog",        n:"ideco-nflog",       s:"NFLOG→CH",      dom:"dp_acl", sk:"both",   lang:"C",  fw:"libnetfilter_log",desc:"",det:[] },
+  { id:"strongswan_dp",n:"strongSwan",        s:"IPSec",         dom:"dp_acl", sk:"both",   lang:"C",  fw:"strongSwan",    desc:"",det:[] },
+  { id:"frr_dp",       n:"FRRouting",         s:"zebra/bgpd",    dom:"dp_acl", sk:"both",   lang:"C",  fw:"FRRouting",     desc:"",det:[] },
+  { id:"keepalived_dp",n:"keepalived",        s:"VRRP",          dom:"dp_acl", sk:"both",   lang:"C",  fw:"keepalived",    desc:"",det:[] },
+  // INFRA
+  { id:"system",  n:"system-backend",   s:"Ядро",        dom:"sys_i",sk:"both",lang:"Python",fw:"psutil",   desc:"",det:[] },
+  { id:"license", n:"license-backend",  s:"Лицензии",    dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
+  { id:"backup",  n:"backup-backend",   s:"Бэкапы",      dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
+  { id:"sysupd",  n:"sysupdate-backend",s:"Обновления",  dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
+  { id:"cert",    n:"cert-backend",     s:"PKI",          dom:"sys_i",sk:"both",lang:"Python",fw:"pyOpenSSL",desc:"",det:[] },
+  { id:"vce",     n:"vce-backend",      s:"VCE",          dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
+  { id:"cc",      n:"central-console",  s:"Ideco Center", dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] },
+  { id:"cluster", n:"cluster-backend",  s:"Кластер",      dom:"ha_i", sk:"both",lang:"Python",fw:"aiohttp",  desc:"",det:[] }
+];
 
+const DBS = [
+  { id:"db_perm",   n:"etcd PERM",  sub:"Конфиг",     color:CE  },
+  { id:"db_run",    n:"etcd RUN",   sub:"Оперативные", color:CE2 },
+  { id:"db_ch",     n:"ClickHouse", sub:"Логи",        color:CC  },
+  { id:"db_sq_ad",  n:"SQLite:AD",  sub:"Кэш",         color:CS  },
+  { id:"db_sq_usr", n:"SQLite:Usr", sub:"Учётки",      color:CS2 },
+  { id:"db_sq_ips", n:"SQLite:IPS", sub:"Rules",       color:CS3 },
+  { id:"db_rk",     n:"RocksDB",    sub:"URL",         color:CR  }
+];
+const DB_COMP_MAP = { db_perm:DB_PERM, db_run:DB_RUN, db_ch:DB_CH, db_sq_ad:DB_SQ_AD, db_sq_usr:DB_SQ_USR, db_sq_ips:DB_SQ_IPS, db_rk:DB_RK };
 
-// ── 4. Очистить описания ─────────────────────────────────────
-// В редакторе с поддержкой regex (VS Code):
-//   Найти:  (desc:)"[^"]*"
-//   Заменить: $1""
-//
-//   Найти:  (det:)\[[^\]]*\]
-//   Заменить: $1[]
+const DEF_TEAMS = [
+  { id:"t_net", name:"Network & Routing",   members:["l2","dns_be","dhcp_be","routing","igmp","netscan","unbound_dp","dhcpd_dp","frr_dp","keepalived_dp"] },
+  { id:"t_fw",  name:"Firewall & Traffic",  members:["fw","alias","acl","cfw","shaper","vpp_be","vpp_dp","bpf","nflog"] },
+  { id:"t_sec", name:"Security & CF",       members:["cf","suricata_be","av","waf_be","proxy_be","reverse","suricata_dp","squid_dp","ecap_av","ecap_urls","modsec_dp","appctrl"] },
+  { id:"t_auth",name:"Auth & Users",        members:["auth","ad","ald","user","webauthd","vpnauthd"] },
+  { id:"t_vpn", name:"VPN & Remote",        members:["vpnsrv","ipsec","gostvpn","agent","wg","strongswan_dp"] },
+  { id:"t_mon", name:"Monitoring & Reports",members:["monitor","reports","audit","logs","servers","mail"] },
+  { id:"t_plat",name:"Platform & Infra",    members:["system","license","backup","sysupd","cert","vce","cc","cluster"] },
+  { id:"t_ui",  name:"UI & API",            members:["web","cabinet","restapi"] },
+  { id:"t_perf",name:"Perf & DPI",          members:["flowsrv","flowexp","trafmond"] }
+];
 
+const LIBS = {"system":["alerts","cluster","inet-access","license","vce","cert"],"alias":["ad-users","alias","cluster","firewall","gost-vpn","inet-access","license","sessions","vce"],"fw":["alerts","alias","cluster","firewall","gost-vpn","ipsec","l2manager","routing","system","vce","vpn-servers","suricata"],"auth":["ad-users","agent","alerts","alias","auth","ipsec","license","sessions","system","vpn-servers","vpn-authd","vce"],"web":["ad-users","alerts","alias","cert","system","vce","vpn-authd"],"reports":["ad-users","alias","auth","cert","content-filter","license","reports","vce","av","cluster","firewall","l2manager","sessions","suricata","system"],"monitor":["alerts","alias","l2manager","reports","sessions","suricata","system","vce","waf","cluster","inet-access","license"],"routing":["agent","alerts","alias","cluster","gost-vpn","inet-access","ipsec","l2manager","routing","sessions","vce","vpn-servers"],"dns_be":["ad-users","alerts","alias","l2manager","license","routing","sessions","vpn-servers"],"dhcp_be":["alias","dhcp-server","l2manager","proxy","sessions","system","vce"],"proxy_be":["ad-users","alerts","av","cert","content-filter","l2manager","proxy","system","vce"],"cf":["alerts","cert","content-filter","inet-access","license","servers","vpp"],"suricata_be":["alerts","alias","inet-access","l2manager","license","routing","sessions","suricata","vce"],"av":["av","inet-access","license","vce","vpp"],"waf_be":["system","vce","waf"],"reverse":["ad-users","agent","cert","l2manager","proxy","vce","alerts"],"cert":["alerts","cert","l2manager","vce"],"vpnsrv":["ad-users","agent","alerts","alias","cert","l2manager","sessions","routing","vce","vpn-authd","vpn-servers"],"ipsec":["ad-users","alerts","alias","cert","firewall","ipsec","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"gostvpn":["alerts","alias","gost-vpn","cert","firewall"],"agent":["ad-users","agent","auth","cert","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"user":["auth","license","sessions","system","ad-users","alias"],"ad":["ad-users","alerts","alias","auth","system","vce"],"ald":["alerts","alias","auth","vce"],"audit":["system"],"logs":["servers"],"servers":["system"],"license":["alerts","license","system","vce"],"backup":["system"],"cluster":["cluster","l2manager","license","system","vce"],"sysupd":["license","system"],"mail":["system"],"vce":["system","vce"],"cc":["system"],"restapi":["alias","auth","system","vce"],"cabinet":["system","vce"],"cfw":["alias","firewall","vce"],"shaper":["alias","firewall","vce"],"netscan":["l2manager"],"igmp":["alias","system","vce"],"acl":["alias","firewall","vce"],"vpp_be":["alias","cluster","vce","vpp"],"l2":["alias","firewall","l2manager","system","vpp","cluster","vce"]};
+const LIB2ID = {"alias":"alias","auth":"auth","cert":"cert","cluster":"cluster","license":"license","vce":"vce","system":"system","firewall":"fw","routing":"routing","l2manager":"l2","proxy":"proxy_be","content-filter":"cf","av":"av","reports":"reports","monitor":"monitor","alerts":"monitor","inet-access":"auth","ad-users":"ad","sessions":"auth","vpn-servers":"vpnsrv","agent":"agent","ipsec":"ipsec","gost-vpn":"gostvpn","dhcp-server":"dhcp_be","suricata":"suricata_be","waf":"waf_be","servers":"servers","vpn-authd":"vpnauthd","vpp":"vpp_be"};
 
-// ── 5. Ортогональные линии (L-shape) ────────────────────────
-// Замени ВСЕ три useMemo (svcL, dpLines, dbLines)
-// и соответствующий JSX на следующее:
+const CW=148,CG=5,RH=36,RG=3,DT=16,LT=30,LP=12,IW=190;
+function buildLayout() {
+  const pos={};let y=8,mW=0;
+  LAYERS.forEach(lay=>{
+    const ds=Object.keys(DOMS).filter(k=>DOMS[k].ly===lay.id);
+    let tw=LP; ds.forEach(()=>{tw+=CW+CG+10;}); if(tw>mW)mW=tw;
+  });
+  LAYERS.forEach(lay=>{
+    const ds=Object.keys(DOMS).filter(k=>DOMS[k].ly===lay.id);
+    let maxR=0; ds.forEach(dk=>{const cnt=C.filter(c=>c.dom===dk).length;if(cnt>maxR)maxR=cnt;});
+    const lH=LT+maxR*(RH+RG)+DT+12;
+    pos["L_"+lay.id]={x:LP,y,w:mW,h:lH};
+    let dx=LP+6;
+    ds.forEach(dk=>{
+      const comps=C.filter(c=>c.dom===dk),dW=CW+8;
+      pos["D_"+dk]={x:dx,y:y+LT,w:dW,h:lH-LT-6};
+      comps.forEach((c,ci)=>{pos[c.id]={x:dx+4,y:y+LT+DT+ci*(RH+RG),w:CW,h:RH};});
+      dx+=dW+CG;
+    });
+    y+=lH+6;
+  });
+  const iH=y-8-6,iX=mW+LP+10;
+  pos.INFRA={x:iX,y:8,w:IW,h:iH};
+  const infraDs=Object.keys(DOMS).filter(k=>DOMS[k].ly==="infra");
+  let iy=40;
+  infraDs.forEach(dk=>{
+    const comps=C.filter(c=>c.dom===dk),dH=comps.length*(RH+RG)+DT+8;
+    pos["D_"+dk]={x:iX+6,y:8+iy,w:IW-12,h:dH};
+    comps.forEach((c,ci)=>{pos[c.id]={x:iX+10,y:8+iy+DT+ci*(RH+RG),w:IW-20,h:RH};});
+    iy+=dH+6;
+  });
+  pos["D_db_i"]={x:iX+6,y:8+iy,w:IW-12,h:DBS.length*32+DT+8};
+  DBS.forEach((db,di)=>{pos[db.id]={x:iX+10,y:8+iy+DT+di*32,w:IW-20,h:26};});
+  return pos;
+}
+const POS=buildLayout();
 
-// ---- helper: ортогональный путь от rect A до rect B --------
-// Вставь эту функцию ПЕРЕД App() (после buildLayout):
+function getConn(id) {
+  const libs=LIBS[id]; if(!libs) return new Set();
+  const s=new Set();
+  libs.forEach(lib=>{const m=LIB2ID[lib];if(m&&m!==id)s.add(m);});
+  Object.keys(LIBS).forEach(oid=>{
+    if(oid===id)return;
+    (LIBS[oid]||[]).forEach(lib=>{const m=LIB2ID[lib];if(m===id)s.add(oid);});
+  });
+  return s;
+}
+function getLibsBtw(a,b) {
+  const r=[];
+  (LIBS[a]||[]).forEach(l=>{if(LIB2ID[l]===b)r.push(l);});
+  (LIBS[b]||[]).forEach(l=>{if(LIB2ID[l]===a&&!r.includes(l))r.push(l);});
+  return r;
+}
+function getDbC(did){return DB_COMP_MAP[did]||[];}
+function getDpLinks(id){return DP_LINKS.filter(l=>l.from===id||l.to===id);}
 
+// FIX #2: ортогональный путь между двумя прямоугольниками
+// Выходим от ближайшей стороны, делаем одно колено (L-shape)
 function orthoPts(ax,ay,aw,ah, bx,by,bw,bh) {
-  // выбираем сторону выхода и входа
-  const aCx=ax+aw/2, aCy=ay+ah/2;
-  const bCx=bx+bw/2, bCy=by+bh/2;
-  let x1,y1,x2,y2;
-  if(ax+aw <= bx) {          // A левее B
+  const aCy=ay+ah/2, bCy=by+bh/2;
+  const aCx=ax+aw/2, bCx=bx+bw/2;
+  let x1,y1,x2,y2,mx,my;
+  if(ax+aw<=bx) {
+    // A левее B: выходим вправо от A, входим слева в B
     x1=ax+aw; y1=aCy; x2=bx; y2=bCy;
-  } else if(bx+bw <= ax) {   // A правее B
-    x1=ax;    y1=aCy; x2=bx+bw; y2=bCy;
-  } else if(ay+ah <= by) {   // A выше B
+    mx=x2; my=y1;
+  } else if(bx+bw<=ax) {
+    // A правее B: выходим влево от A, входим справа в B
+    x1=ax; y1=aCy; x2=bx+bw; y2=bCy;
+    mx=x2; my=y1;
+  } else if(ay+ah<=by) {
+    // A выше B: выходим снизу из A, входим сверху в B
     x1=aCx; y1=ay+ah; x2=bCx; y2=by;
-  } else {                   // A ниже B
+    mx=x1; my=y2;
+  } else {
+    // A ниже B: выходим сверху из A, входим снизу в B
     x1=aCx; y1=ay; x2=bCx; y2=by+bh;
+    mx=x1; my=y2;
   }
-  // mid point для L-shape
-  const mx = (x1===ax||x1===ax+aw) ? x2 : x1; // горизонт сначала
-  const my = y1;
   return `M${x1},${y1} L${mx},${my} L${x2},${y2}`;
 }
 
-// ---- замени svcL ----------------------------------------
-const svcL=useMemo(()=>{
-  if(!ac)return[];
-  const fp=POS[ac]; if(!fp)return[];
-  return Array.from(conn).map(cid=>{
-    const tp=POS[cid]; if(!tp)return null;
-    const libs=getLibsBtw(ac,cid);
-    return {
-      d: orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
-      color:O+"88",
-      proto:libs.map(l=>LINK_DESC[l]||l).join(", ")
-    };
-  }).filter(Boolean);
-},[ac,conn]);
+export default function App() {
+  const svgRef=useRef(null);
+  const [theme,setTheme]=useState("light"); const T=THEMES[theme];
+  const [sel,setSel]=useState(null);
+  const [pan,setPan]=useState({x:0,y:0});
+  const [zoom,setZoom]=useState(0.52);
+  const [panning,setPanning]=useState(false);
+  const ps=useRef(null); const dd=useRef(false);
+  const [search,setSearch]=useState("");
+  const [sL,setSL]=useState(null);
+  const [sD,setSD]=useState(null);
+  const [sDb,setSDb]=useState(null);
+  const [tt,setTT]=useState(null);
+  const [scenario,setScenario]=useState(null);
+  const [scStep,setScStep]=useState(0);
+  const [teams,setTeams]=useState(DEF_TEAMS);
+  const [showTeams,setShowTeams]=useState(false);
+  const [dragComp,setDragComp]=useState(null);
+  const [dragOver,setDragOver]=useState(null);
+  const [teamHL,setTeamHL]=useState(null);
+  const [showAllLinks,setShowAllLinks]=useState(false);
+  const [undoStack,setUndoStack]=useState([]);
 
-// ---- замени dbLines -------------------------------------
-const dbLines=useMemo(()=>{
-  if(ac){
+  const ac=sel;
+  // FIX #3: убрали hDb — hover не подсвечивает хранилища
+  const adb=sDb;
+  const conn=useMemo(()=>ac?getConn(ac):new Set(),[ac]);
+  const selC=useMemo(()=>C.find(c=>c.id===sel)||null,[sel]);
+
+  // FIX #5: поиск (плейсхолдер изменён ниже в JSX)
+  const sIds=useMemo(()=>{
+    if(!search.trim())return null;
+    const q=search.toLowerCase();
+    return new Set(C.filter(c=>
+      c.n.toLowerCase().includes(q)||c.s.toLowerCase().includes(q)||
+      (c.desc&&c.desc.toLowerCase().includes(q))||(c.det&&c.det.join(" ").toLowerCase().includes(q))
+    ).map(c=>c.id));
+  },[search]);
+
+  const dbBk=useMemo(()=>adb?new Set(getDbC(adb)):new Set(),[adb]);
+  // FIX #3: selCompDbs — только для клика, не для hover
+  const selCompDbs=useMemo(()=>{
+    if(!ac)return new Set();
+    const s=new Set(); DBS.forEach(db=>{if(getDbC(db.id).includes(ac))s.add(db.id);}); return s;
+  },[ac]);
+  const activeDbColor=useMemo(()=>{if(!adb)return null;const db=DBS.find(d=>d.id===adb);return db?db.color:null;},[adb]);
+
+  const scHighlight=useMemo(()=>{
+    if(!scenario)return new Set();
+    const sc=SCENARIOS.find(s=>s.id===scenario); if(!sc)return new Set();
+    return new Set(sc.steps.slice(0,scStep+1).map(s=>s.comp));
+  },[scenario,scStep]);
+  const scCurrent=useMemo(()=>{
+    if(!scenario)return null;
+    const sc=SCENARIOS.find(s=>s.id===scenario); return sc?sc.steps[scStep]:null;
+  },[scenario,scStep]);
+  const scLines=useMemo(()=>{
+    if(!scenario)return[];
+    const sc=SCENARIOS.find(s=>s.id===scenario); if(!sc)return[];
+    const lines=[];
+    for(let i=0;i<Math.min(scStep,sc.steps.length-1);i++){
+      const f=POS[sc.steps[i].comp],t=POS[sc.steps[i+1].comp];
+      if(f&&t)lines.push({x1:f.x+f.w/2,y1:f.y+f.h/2,x2:t.x+t.w/2,y2:t.y+t.h/2});
+    }
+    return lines;
+  },[scenario,scStep]);
+
+  const compTeamMap=useMemo(()=>{const m={};teams.forEach(t=>t.members.forEach(cid=>{m[cid]=t.id;}));return m;},[teams]);
+  const teamHLSet=useMemo(()=>{if(!teamHL)return new Set();const t=teams.find(x=>x.id===teamHL);return t?new Set(t.members):new Set();},[teamHL,teams]);
+  const dpConnSet=useMemo(()=>{if(!ac)return new Set();const s=new Set();getDpLinks(ac).forEach(lk=>s.add(lk.from===ac?lk.to:lk.from));return s;},[ac]);
+
+  // FIX #2: ортогональные линии lib-связей
+  const svcL=useMemo(()=>{
+    if(!ac)return[];
     const fp=POS[ac]; if(!fp)return[];
-    return DBS.filter(db=>getDbC(db.id).includes(ac)).map(db=>{
-      const tp=POS[db.id]; if(!tp)return null;
-      return {
-        d: orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
-        color:db.color, did:db.id
+    return Array.from(conn).map(cid=>{
+      const tp=POS[cid]; if(!tp)return null;
+      const libs=getLibsBtw(ac,cid);
+      return{
+        d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
+        proto:libs.map(l=>LINK_DESC[l]||l).join(", ")
       };
     }).filter(Boolean);
-  }
-  if(adb){
-    const dp=POS[adb]; if(!dp)return[];
-    const db2=DBS.find(d=>d.id===adb); if(!db2)return[];
-    return getDbC(adb).map(cid=>{
-      const cp=POS[cid]; if(!cp)return null;
-      return {
-        d: orthoPts(cp.x,cp.y,cp.w,cp.h, dp.x,dp.y,dp.w,dp.h),
-        color:db2.color, did:adb
+  },[ac,conn]);
+
+  // FIX #2: ортогональные линии к хранилищам
+  const dbLines=useMemo(()=>{
+    if(ac){
+      const fp=POS[ac]; if(!fp)return[];
+      return DBS.filter(db=>getDbC(db.id).includes(ac)).map(db=>{
+        const tp=POS[db.id]; if(!tp)return null;
+        return{ d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h), color:db.color, did:db.id };
+      }).filter(Boolean);
+    }
+    if(adb){
+      const dp=POS[adb]; if(!dp)return[];
+      const db2=DBS.find(d=>d.id===adb); if(!db2)return[];
+      return getDbC(adb).map(cid=>{
+        const cp=POS[cid]; if(!cp)return null;
+        return{ d:orthoPts(cp.x,cp.y,cp.w,cp.h, dp.x,dp.y,dp.w,dp.h), color:db2.color, did:adb };
+      }).filter(Boolean);
+    }
+    return[];
+  },[ac,adb]);
+
+  // FIX #2+#4: DP-линки тоже ортогональные, цвет бирюзовый (OS-level протоколы)
+  const dpLines=useMemo(()=>{
+    if(!ac)return[];
+    const fp=POS[ac]; if(!fp)return[];
+    return getDpLinks(ac).map(lk=>{
+      const otherId=lk.from===ac?lk.to:lk.from;
+      const tp=POS[otherId]; if(!tp)return null;
+      return{
+        d:orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
+        proto:lk.proto, desc:lk.desc
       };
     }).filter(Boolean);
+  },[ac]);
+
+  const onW=useCallback(e=>{
+    e.preventDefault();
+    const r=svgRef.current.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    const f=e.deltaY>0?0.93:1.07;
+    const nz=Math.max(0.12,Math.min(2.5,zoom*f));
+    setPan(p=>({x:mx-(mx-p.x)*(nz/zoom),y:my-(my-p.y)*(nz/zoom)}));
+    setZoom(nz);
+  },[zoom]);
+  useEffect(()=>{const el=svgRef.current;if(el)el.addEventListener("wheel",onW,{passive:false});return()=>{if(el)el.removeEventListener("wheel",onW);};},[onW]);
+  const onMD=useCallback(e=>{setPanning(true);ps.current={x:e.clientX-pan.x,y:e.clientY-pan.y};dd.current=false;},[pan]);
+  const onMM=useCallback(e=>{if(panning&&ps.current){if(Math.abs(e.clientX-ps.current.x-pan.x)>3||Math.abs(e.clientY-ps.current.y-pan.y)>3)dd.current=true;setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});}},[panning,pan]);
+  const onMU=useCallback(()=>{setPanning(false);ps.current=null;},[]);
+
+  function clr(){if(!dd.current){setSel(null);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setShowAllLinks(false);}}
+  function si(fn,e){e.stopPropagation();if(!dd.current)fn();}
+  function showTTip(e,t){if(!t)return;const r=svgRef.current.getBoundingClientRect();setTT({x:e.clientX-r.left+14,y:e.clientY-r.top-10,text:t});}
+  function doUndo(){if(!undoStack.length)return;setTeams(undoStack[undoStack.length-1]);setUndoStack(s=>s.slice(0,-1));}
+  function moveComp(cid,tid){setUndoStack(s=>s.concat([teams]));setTeams(prev=>prev.map(t=>{const f=t.members.filter(m=>m!==cid);return t.id===tid?{...t,members:[...f,cid]}:{...t,members:f};}));}
+
+  const activeSc=scenario?SCENARIOS.find(s=>s.id===scenario):null;
+
+  let side=null;
+  if(selC){
+    const cdbs=DBS.filter(db=>getDbC(db.id).includes(selC.id));
+    const lcs=[];
+    conn.forEach(cid=>{const c2=C.find(x=>x.id===cid);if(!c2)return;getLibsBtw(selC.id,cid).forEach(l=>lcs.push({cid,nm:c2.n,lib:l}));});
+    const dpL=getDpLinks(selC.id);
+    const myTeam=teams.find(t=>t.members.includes(selC.id))||null;
+    const lcsShow=showAllLinks?lcs:lcs.slice(0,10);
+    side=(
+      <div style={{padding:14}}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+          <span style={{background:O,color:"#fff",fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{DOMS[selC.dom]?DOMS[selC.dom].l:""}</span>
+          <span style={{background:SC[selC.sk]+"33",color:SC[selC.sk],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{SL[selC.sk]}</span>
+          {myTeam&&<span style={{background:TCOL[myTeam.id]+"33",color:TCOL[myTeam.id],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{myTeam.name}</span>}
+        </div>
+        <h2 style={{margin:"0 0 2px",fontSize:17,color:T.TX,fontFamily:"monospace"}}>{selC.n}</h2>
+        <div style={{fontSize:11,color:Ob,marginBottom:8}}>{selC.s}</div>
+        {selC.desc&&<p style={{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}}>{selC.desc}</p>}
+        <div style={{background:T.BG,borderRadius:5,padding:8,marginBottom:10,border:"1px solid "+T.BD,fontSize:10}}>
+          <span style={{color:T.TD}}>Язык: </span><span style={{color:T.TX}}>{selC.lang}</span>
+          {" · "}<span style={{color:T.TD}}>Lib: </span><span style={{color:T.TX}}>{selC.fw}</span>
+          {" · "}<span style={{color:T.TD}}>Режим: </span><span style={{color:SC[selC.sk]}}>{SL[selC.sk]}</span>
+        </div>
+        {selC.det&&selC.det.length>0&&<div style={{marginBottom:10}}>{selC.det.map((d,i)=><div key={i} style={{fontSize:11,color:T.TX}}>· {d}</div>)}</div>}
+        {dpL.length>0&&<div style={{marginBottom:10}}>
+          <div style={{fontSize:9,color:"#4ecdc4",fontWeight:700,marginBottom:3}}>DP-ВЗАИМОДЕЙСТВИЕ ({dpL.length})</div>
+          {dpL.map((lk,i)=>{
+            const otherId=lk.from===selC.id?lk.to:lk.from;
+            const other=C.find(x=>x.id===otherId)||null;
+            return <div key={i} style={{marginBottom:4,padding:"4px 6px",borderRadius:4,background:"#4ecdc410",border:"1px solid #4ecdc422"}}>
+              <div style={{cursor:"pointer",display:"flex",gap:4,alignItems:"center"}} onClick={()=>setSel(otherId)}>
+                <span style={{color:"#4ecdc4",fontSize:10}}>{lk.from===selC.id?"→":"←"}</span>
+                <span style={{color:T.TX,fontSize:10,fontFamily:"monospace"}}>{other?other.n:otherId}</span>
+              </div>
+              <div style={{fontSize:9,color:CE,marginTop:1}}>🔌 {lk.proto}</div>
+              <div style={{fontSize:9,color:T.TD,marginTop:1}}>{lk.desc}</div>
+            </div>;
+          })}
+        </div>}
+        {cdbs.length>0&&<div style={{marginBottom:10}}>
+          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>ХРАНИЛИЩА</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
+            {cdbs.map(db=><span key={db.id} onClick={()=>{setSDb(db.id);setSel(null);}} style={{fontSize:9,color:db.color,background:db.color+"15",border:"1px solid "+db.color+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}}>{db.n}</span>)}
+          </div>
+        </div>}
+        {lcs.length>0&&<div>
+          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>СВЯЗИ ПО LIBS ({lcs.length})</div>
+          {lcsShow.map((lc,i)=><div key={i} onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}} style={{fontSize:10,cursor:"pointer",padding:"2px 0",display:"flex",gap:4,alignItems:"center"}}>
+            <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
+            <span style={{color:T.TD,fontSize:8,background:T.BG,padding:"1px 4px",borderRadius:3}}>{lc.lib}</span>
+          </div>)}
+          {lcs.length>10&&<button onClick={e=>{e.stopPropagation();setShowAllLinks(!showAllLinks);}} style={{marginTop:4,fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid "+T.BD,background:T.BG,color:O,cursor:"pointer"}}>
+            {showAllLinks?"Скрыть ↑":"Показать все ("+lcs.length+") ↓"}
+          </button>}
+        </div>}
+      </div>
+    );
+  } else if(sDb) {
+    const dbObj=DBS.find(d=>d.id===sDb)||null;
+    const dbc=dbObj?getDbC(dbObj.id):[];
+    if(dbObj) side=(
+      <div style={{padding:14}}>
+        <div style={{display:"inline-block",background:dbObj.color+"22",border:"1px solid "+dbObj.color+"44",borderRadius:4,padding:"2px 8px",marginBottom:8,fontSize:9,fontWeight:700,color:dbObj.color}}>{dbObj.sub}</div>
+        <h2 style={{fontSize:16,color:dbObj.color,margin:"0 0 6px"}}>{dbObj.n}</h2>
+        <p style={{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}}>{DB_LINK_DESC[dbObj.id]||""}</p>
+        {dbc.length>0&&<div>
+          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>БЭКЕНДЫ И DAEMON'Ы ({dbc.length})</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
+            {dbc.map(cid=>{const c2=C.find(x=>x.id===cid)||null;return c2?<span key={cid} onClick={()=>{setSel(cid);setSDb(null);}} style={{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}}>{c2.n}</span>:null;})}
+          </div>
+        </div>}
+      </div>
+    );
+  } else if(sL) {
+    const layObj=LAYERS.find(l=>l.id===sL)||null;
+    const label=sL==="infra"?"INFRASTRUCTURE":(layObj?layObj.label:"");
+    side=<div style={{padding:14}}><h2 style={{fontSize:16,color:O}}>{label}</h2><p style={{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}}>{LAYER_DESC[sL]||""}</p></div>;
+  } else if(sD) {
+    const domObj=DOMS[sD]||null;
+    side=<div style={{padding:14}}>
+      <h2 style={{fontSize:16,color:O}}>{domObj?domObj.l:""}</h2>
+      <p style={{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}}>{DOM_DESC[sD]||""}</p>
+      <div style={{marginTop:10}}>{C.filter(c=>c.dom===sD).map(c=><div key={c.id} onClick={()=>{setSel(c.id);setSD(null);}} style={{padding:"3px 6px",borderRadius:4,cursor:"pointer",background:T.BG,marginBottom:2,border:"1px solid "+T.BD,fontSize:10}}>
+        <span style={{color:T.TX,fontFamily:"monospace"}}>{c.n}</span> <span style={{color:SC[c.sk],fontSize:8}}>{SL[c.sk]}</span>
+      </div>)}</div>
+    </div>;
   }
-  return[];
-},[ac,adb]);
+  const showSB=side!==null;
 
-// ---- замени dpLines -------------------------------------
-// DP-линки — OS-level протоколы (NFQUEUE, Unix socket, KNI).
-// Это принципиально иной механизм чем Python lib imports,
-// поэтому цвет отличается (#4ecdc4 = бирюзовый), но без стрелок.
-const dpLines=useMemo(()=>{
-  if(!ac)return[];
-  const fp=POS[ac]; if(!fp)return[];
-  return getDpLinks(ac).map(lk=>{
-    const otherId=lk.from===ac?lk.to:lk.from;
-    const tp=POS[otherId]; if(!tp)return null;
-    return {
-      d: orthoPts(fp.x,fp.y,fp.w,fp.h, tp.x,tp.y,tp.w,tp.h),
-      proto:lk.proto, desc:lk.desc, color:"#4ecdc4"
-    };
-  }).filter(Boolean);
-},[ac]);
+  return (
+    <div style={{width:"100%",height:"100vh",background:T.BG,fontFamily:"system-ui,sans-serif",display:"flex",overflow:"hidden"}}>
+      {showTeams&&<div style={{width:260,minWidth:260,background:T.CD,borderRight:"1px solid "+T.BD,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <div style={{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <span style={{fontSize:13,fontWeight:700,color:O}}>👥 Команды</span>
+          {undoStack.length>0&&<button onClick={doUndo} style={{background:"none",border:"1px solid "+T.BD,borderRadius:4,color:T.TX,cursor:"pointer",fontSize:10,padding:"2px 6px"}}>↩ Отмена</button>}
+        </div>
+        <div style={{padding:"0 12px 6px",fontSize:9,color:T.TD,flexShrink:0}}>Перетаскивайте бэкенды между командами</div>
+        <div style={{flex:1,overflowY:"auto",padding:"0 6px 6px"}}>
+          {teams.map(team=>{const tc=TCOL[team.id];return(
+            <div key={team.id} onDragOver={e=>{e.preventDefault();setDragOver(team.id);}} onDragLeave={()=>setDragOver(null)} onDrop={e=>{e.preventDefault();if(dragComp)moveComp(dragComp,team.id);setDragComp(null);setDragOver(null);}} style={{margin:"0 0 4px",borderRadius:6,border:"2px solid "+(dragOver===team.id?tc:tc+"22"),background:tc+"08",padding:6}}>
+              <div onClick={()=>{setTeamHL(teamHL===team.id?null:team.id);setSel(null);setSDb(null);setScenario(null);}} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:3}}>
+                <div style={{width:10,height:10,borderRadius:5,background:tc,flexShrink:0}}/>
+                <span style={{fontSize:11,fontWeight:700,color:tc,flex:1}}>{team.name}</span>
+                <span style={{fontSize:9,color:T.TD}}>{team.members.length}</span>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
+                {team.members.map(cid=>{const comp=C.find(x=>x.id===cid)||null;if(!comp)return null;return(
+                  <span key={cid} draggable onDragStart={e=>{setDragComp(cid);e.dataTransfer.effectAllowed="move";}} onDragEnd={()=>{setDragComp(null);setDragOver(null);}} onClick={e=>{e.stopPropagation();setSel(cid);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setScenario(null);}} style={{fontSize:8,fontFamily:"monospace",padding:"2px 5px",borderRadius:3,cursor:"grab",userSelect:"none",background:tc+"18",color:tc,border:"1px solid "+tc+"33",opacity:dragComp===cid?0.3:1}}>{comp.n}</span>
+                );})}
+              </div>
+            </div>
+          );})}
+        </div>
+      </div>}
 
+      <div style={{flex:1,position:"relative"}}>
+        <svg ref={svgRef} width="100%" height="100%" style={{cursor:panning?"grabbing":"grab"}} onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={()=>{onMU();setTT(null);}} onClick={clr}>
+          <defs><filter id="gl"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            {/* Layer backgrounds */}
+            {LAYERS.map(lay=>{const p=POS["L_"+lay.id];if(!p)return null;return(
+              <g key={lay.id} onClick={e=>si(()=>{setSL(lay.id);setSel(null);setSD(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
+                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={10} fill={lay.color+"08"} stroke={lay.color+"33"} strokeWidth={1.5} strokeDasharray="10,5"/>
+                <text x={p.x+10} y={p.y+16} fontSize={12} fontWeight={800} fill={lay.color} letterSpacing="1.5">{lay.label}</text>
+                <text x={p.x+10} y={p.y+28} fontSize={8} fill={T.TD}>{lay.desc}</text>
+              </g>
+            );})}
+            {POS.INFRA&&<g onClick={e=>si(()=>{setSL("infra");setSel(null);setSD(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
+              <rect x={POS.INFRA.x} y={POS.INFRA.y} width={POS.INFRA.w} height={POS.INFRA.h} rx={10} fill={O3+"08"} stroke={O3+"33"} strokeWidth={1.5} strokeDasharray="10,5"/>
+              <text x={POS.INFRA.x+8} y={POS.INFRA.y+18} fontSize={12} fontWeight={800} fill={O3} letterSpacing="1.5">INFRASTRUCTURE</text>
+            </g>}
+            {/* Domain backgrounds */}
+            {Object.keys(DOMS).map(dk=>{const dv=DOMS[dk],p=POS["D_"+dk];if(!p)return null;return(
+              <g key={dk} onClick={e=>si(()=>{setSD(dk);setSel(null);setSL(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
+                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={6} fill={T.CD} stroke={dv.c+"30"}/>
+                <text x={p.x+5} y={p.y+12} fontSize={8} fontWeight={700} fill={dv.c}>{dv.l}</text>
+              </g>
+            );})}
+            {/* FIX #3: DB nodes — подсвечиваются только при клике (adb=sDb), не при hover */}
+            {DBS.map(db=>{const p=POS[db.id];if(!p)return null;
+              const lit=(ac&&selCompDbs.has(db.id))||(adb===db.id);
+              return(
+              <g key={db.id} onClick={e=>si(()=>{setSDb(sDb===db.id?null:db.id);setSel(null);setSL(null);setSD(null);},e)} style={{cursor:"pointer"}}>
+                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={lit?db.color+"22":T.CD} stroke={lit?db.color:db.color+"44"} strokeWidth={lit?2.5:1}/>
+                <text x={p.x+6} y={p.y+11} fontSize={8} fontWeight={700} fill={db.color}>{db.n}</text>
+                <text x={p.x+6} y={p.y+21} fontSize={6} fill={T.TD}>{db.sub}</text>
+              </g>
+            );})}
+            {/* Component rects */}
+            {C.map(c=>{const p=POS[c.id];if(!p)return null;
+              const isS=sel===c.id,isC=conn.has(c.id),isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id),isDpC=dpConnSet.has(c.id);
+              const hc=isDbC&&activeDbColor?activeDbColor:null;
+              const tid=compTeamMap[c.id];const tc=tid?TCOL[tid]:null;
+              const dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
+              const scDim=scenario&&!isSc,tDim=teamHL&&!isTHL;
+              const fillC=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
+              const strC=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
+              const strW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
+              const txC=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
+              return(
+                <g key={c.id} onClick={e=>si(()=>{setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e)} style={{cursor:"pointer"}} opacity={dim||scDim||tDim?0.07:1}>
+                  {tc&&<rect x={p.x} y={p.y} width={4} height={p.h} rx={2} fill={tc} opacity={0.8}/>}
+                  <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={fillC} stroke={strC} strokeWidth={strW}/>
+                  <text x={p.x+8} y={p.y+14} fontSize={9} fontWeight={700} fill={txC}>{c.n}</text>
+                  <text x={p.x+8} y={p.y+25} fontSize={7} fill={T.TD}>{c.s}</text>
+                  <rect x={p.x+p.w-34} y={p.y+2} width={32} height={10} rx={3} fill={SC[c.sk]+"22"} stroke={SC[c.sk]+"44"} strokeWidth={0.5}/>
+                  <text x={p.x+p.w-18} y={p.y+10} fontSize={6} fontWeight={700} fill={SC[c.sk]} textAnchor="middle">{SL[c.sk]}</text>
+                  {isScCur&&<text x={p.x+p.w/2} y={p.y-4} fontSize={10} fontWeight={800} fill="#4ecdc4" textAnchor="middle">▼</text>}
+                </g>
+              );
+            })}
+            {/* FIX #2: линии поверх компонентов, ортогональные L-shape, без тултипов на линиях */}
+            {svcL.map((l,i)=>(
+              <path key={"s"+i} d={l.d} fill="none"
+                stroke={O+"88"} strokeWidth={1.5} opacity={0.85} strokeDasharray="5,3"
+                style={{pointerEvents:"none"}}/>
+            ))}
+            {dbLines.map((l,i)=>(
+              <path key={"d"+i} d={l.d} fill="none"
+                stroke={l.color} strokeWidth={2} opacity={0.7} strokeDasharray="6,4"
+                style={{pointerEvents:"none"}}/>
+            ))}
+            {/* FIX #4: DP-линки — бирюзовый (OS-level протоколы отличаются от lib-imports) */}
+            {dpLines.map((l,i)=>(
+              <path key={"dp"+i} d={l.d} fill="none"
+                stroke={"#4ecdc4"} strokeWidth={1.5} opacity={0.9} strokeDasharray="5,3"
+                style={{pointerEvents:"none"}}/>
+            ))}
+            {scLines.map((l,i)=><line key={"sc"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#4ecdc4" strokeWidth={3} opacity={0.8} strokeDasharray="8,4"/>)}
 
-// ── 6. JSX для линий (внутри SVG, после компонентов) ────────
-// Замени три блока map линий на:
+            {/* FIX #2: тултипы только на легенде */}
+            <g transform={`translate(${LP},${POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500})`}>
+              <rect x={0} y={0} width={480} height={18} rx={4} fill={T.CD+"dd"} stroke={T.BD}/>
+              {[
+                {c:O+"88",    l:"Lib-связь",   x:6,   tip:"Связи через shared Python-библиотеки (lib-imports).\nПоказывают какие бэкенды используют общий код."},
+                {c:CE,        l:"PERM",         x:68,  tip:DB_LINK_DESC.db_perm},
+                {c:CE2,       l:"RUN",          x:104, tip:DB_LINK_DESC.db_run},
+                {c:CC,        l:"CH",           x:132, tip:DB_LINK_DESC.db_ch},
+                {c:CS,        l:"SQLite",       x:154, tip:"SQLite: AD-кэш (ad-backend), учётки (user-backend), IPS-правила (suricata-backend)"},
+                {c:CR,        l:"RocksDB",      x:196, tip:DB_LINK_DESC.db_rk},
+                {c:"#4ecdc4", l:"DP-протокол",  x:244, tip:"Прямые OS-level связи между daemon'ами Data Plane:\nNFQUEUE, KNI/TPROXY, Unix socket, libecap (in-process),\nring buffer, VRRP/netlink, xauth/EAP."},
+                {c:"#4ecdc4", l:"Сценарий",     x:330, tip:"Текущий активный шаг сценария.\nПошаговая визуализация потока данных."},
+              ].map((x,i)=>(
+                <g key={i} style={{cursor:"help"}}
+                  onMouseEnter={e=>showTTip(e,x.tip)}
+                  onMouseLeave={()=>setTT(null)}>
+                  <rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/>
+                  <text x={x.x+10} y={11} fontSize={6} fill={T.TM}>{x.l}</text>
+                </g>
+              ))}
+            </g>
+          </g>
+        </svg>
 
-{/* lib-связи */}
-{svcL.map((l,i)=>(
-  <path key={"s"+i} d={l.d} fill="none"
-    stroke={l.color} strokeWidth={1.5} opacity={0.85}
-    strokeDasharray="5,3"
-    style={{pointerEvents:"none"}}/>
-))}
+        {tt&&<div style={{position:"absolute",left:Math.min(tt.x,window.innerWidth-270),top:Math.max(10,tt.y),background:T.CD+"f8",border:"1px solid "+T.BD,borderRadius:8,padding:"8px 12px",maxWidth:260,zIndex:30,pointerEvents:"none",fontSize:11,color:T.TX,lineHeight:"1.6",whiteSpace:"pre-line",boxShadow:"0 4px 16px #0004"}}>{tt.text}</div>}
 
-{/* DB-линии */}
-{dbLines.map((l,i)=>(
-  <path key={"d"+i} d={l.d} fill="none"
-    stroke={l.color} strokeWidth={2} opacity={0.7}
-    strokeDasharray="6,4"
-    style={{pointerEvents:"none"}}/>
-))}
+        <div style={{position:"absolute",top:8,left:8,zIndex:20,display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+          {/* FIX #5: плейсхолдер */}
+          <input value={search} onChange={e=>{setSearch(e.target.value);setScenario(null);setTeamHL(null);}} placeholder="🔍 Поиск..." style={{width:160,padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.BG+"ee",color:T.TX,fontSize:11,outline:"none"}}/>
+          <select value={scenario||""} onChange={e=>{const v=e.target.value;setScenario(v||null);setScStep(0);setSel(null);setSDb(null);setTeamHL(null);}} style={{padding:"5px 6px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,fontSize:10,outline:"none",cursor:"pointer"}}>
+            <option value="">📋 Сценарии</option>
+            {SCENARIOS.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button onClick={()=>setShowTeams(!showTeams)} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}}>👥 Команды</button>
+          <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:10}}>{theme==="dark"?"☀️":"🌙"}</button>
+        </div>
 
-{/* DP-линки (OS-level протоколы) */}
-{dpLines.map((l,i)=>(
-  <path key={"dp"+i} d={l.d} fill="none"
-    stroke={l.color} strokeWidth={1.5} opacity={0.9}
-    strokeDasharray="5,3"
-    style={{pointerEvents:"none"}}/>
-))}
+        {activeSc&&<div style={{position:"absolute",bottom:42,left:8,right:showSB?390:8,zIndex:20,background:T.CD+"f5",border:"1px solid #4ecdc444",borderRadius:8,padding:"10px 14px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:12,color:"#4ecdc4",fontWeight:700}}>📋 {activeSc.name}</span>
+            <span style={{fontSize:9,color:T.TD}}>{scStep+1} из {activeSc.steps.length}</span>
+          </div>
+          <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:8}}>
+            <button onClick={()=>setScStep(Math.max(0,scStep-1))} disabled={scStep===0} style={{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep===0?0.4:1}}>←</button>
+            {activeSc.steps.map((s,i)=><div key={i} onClick={()=>setScStep(i)} style={{flex:1,height:4,borderRadius:2,background:i<=scStep?"#4ecdc4":T.BD,opacity:i===scStep?1:0.5,cursor:"pointer"}}/>)}
+            <button onClick={()=>setScStep(Math.min(activeSc.steps.length-1,scStep+1))} disabled={scStep>=activeSc.steps.length-1} style={{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep>=activeSc.steps.length-1?0.4:1}}>→</button>
+          </div>
+          <div style={{background:T.BG,borderRadius:6,padding:"8px 12px",border:"1px solid #4ecdc433"}}>
+            <div style={{fontSize:12,color:"#4ecdc4",fontWeight:700,marginBottom:4}}>{activeSc.steps[scStep].label}</div>
+            <div style={{fontSize:11,color:T.TX,whiteSpace:"pre-line",lineHeight:"1.6"}}>{activeSc.steps[scStep].desc}</div>
+          </div>
+        </div>}
 
+        <div style={{position:"absolute",bottom:8,left:8,display:"flex",gap:3,zIndex:20}}>
+          <button onClick={()=>setZoom(Math.min(2.5,zoom*1.2))} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>+</button>
+          <button onClick={()=>setZoom(Math.max(0.12,zoom/1.2))} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>−</button>
+          <button onClick={()=>{setZoom(0.42);setPan({x:0,y:0});}} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>⟲</button>
+        </div>
+      </div>
 
-// ── 7. Тултипы — только на легенде ──────────────────────────
-// Найди блок легенды (Legend) в SVG и замени полностью на:
-
-<g transform={`translate(${LP},${POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500})`}>
-  <rect x={0} y={0} width={460} height={18} rx={4} fill={T.CD+"dd"} stroke={T.BD}/>
-  {[
-    {c:O+"88",    l:"Lib-связь",   x:6,   tip:"Связи через shared Python-библиотеки (lib-imports). Показывают, какие бэкенды используют общий код."},
-    {c:CE,        l:"PERM",        x:68,  tip:DB_LINK_DESC.db_perm},
-    {c:CE2,       l:"RUN",         x:104, tip:DB_LINK_DESC.db_run},
-    {c:CC,        l:"CH",          x:132, tip:DB_LINK_DESC.db_ch},
-    {c:CS,        l:"SQLite",      x:154, tip:"SQLite: AD-кэш (ad-backend), учётки (user-backend), IPS-правила (suricata-backend)"},
-    {c:CR,        l:"RocksDB",     x:196, tip:DB_LINK_DESC.db_rk},
-    {c:"#4ecdc4", l:"DP-протокол", x:244, tip:"Прямые OS-level связи между daemon'ами Data Plane: NFQUEUE, KNI, Unix socket, libecap (in-process), ring buffer, VRRP/netlink, xauth/EAP."},
-    {c:"#4ecdc4", l:"Сценарий",   x:316, tip:"Текущий активный шаг сценария (пошаговая визуализация потока данных)."},
-  ].map((x,i)=>(
-    <g key={i} style={{cursor:"help"}}
-      onMouseEnter={e=>{
-        const r=svgRef.current.getBoundingClientRect();
-        setTT({x:e.clientX-r.left+14,y:e.clientY-r.top-10,text:x.tip});
-      }}
-      onMouseLeave={()=>setTT(null)}>
-      <rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/>
-      <text x={x.x+10} y={11} fontSize={6} fill={T.TM}>{x.l}</text>
-    </g>
-  ))}
-</g>
+      {showSB&&<div style={{width:380,minWidth:380,background:T.CD,borderLeft:"1px solid "+T.BD,overflowY:"auto",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"flex-end",padding:"6px 10px 0"}}>
+          <button onClick={()=>{setSel(null);setSL(null);setSD(null);setSDb(null);}} style={{background:"none",border:"none",color:T.TD,cursor:"pointer",fontSize:16}}>✕</button>
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>{side}</div>
+      </div>}
+    </div>
+  );
+}
