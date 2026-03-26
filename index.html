@@ -1,5 +1,22 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ideco Architecture</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; }
+    body { overflow: hidden; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useCallback, useEffect, useMemo } = React;
 const THEMES = {
   dark:  { BG:"#0e0d20", CD:"#161530", BD:"#2d2856", TX:"#E1EAF9", TM:"#9b9abb", TD:"#6a6890" },
   light: { BG:"#f5f3f0", CD:"#ffffff", BD:"#d8d4ce", TX:"#1a1a2e", TM:"#5a5870", TD:"#8a8898" }
@@ -314,7 +331,7 @@ function orthoPts(ax,ay,aw,ah, bx,by,bw,bh) {
   return `M${x1},${y1} L${mx},${my} L${x2},${y2}`;
 }
 
-export default function App() {
+function App() {
   const svgRef=useRef(null);
   const [theme,setTheme]=useState("light"); const T=THEMES[theme];
   const [sel,setSel]=useState(null);
@@ -714,3 +731,7 @@ export default function App() {
     </div>
   );
 }
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
