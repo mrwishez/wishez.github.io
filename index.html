@@ -1,643 +1,846 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ideco Architecture</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    html,body,#root{margin:0;padding:0;width:100%;height:100%;}
+    body{overflow:hidden;}
+    *{box-sizing:border-box;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+var useState=React.useState,useRef=React.useRef,useCallback=React.useCallback,useEffect=React.useEffect,useMemo=React.useMemo;
 
-const THEMES = {
-  dark:  { BG:"#0e0d20", CD:"#161530", BD:"#2d2856", TX:"#E1EAF9", TM:"#9b9abb", TD:"#6a6890" },
-  light: { BG:"#f5f3f0", CD:"#ffffff", BD:"#d8d4ce", TX:"#1a1a2e", TM:"#5a5870", TD:"#8a8898" }
-};
-const O="#FF5A1A", Ob="#E77C06", O2="#ff7a4a", O3="#ff9a6a", O4="#cc4815";
-const CE="#4a9ec8", CE2="#3a7ea0", CC="#e05a2a", CS="#9a7ac0", CS2="#7a5aa0", CS3="#b490d0", CR="#c89030";
-const SC = { classic:"#5a8aaf", vpp:"#d06040", both:"#8a8aaa" };
-const SL = { classic:"Classic", vpp:"VPP", both:"Both" };
-const TCOL = { t_net:"#2196F3", t_fw:"#F44336", t_sec:"#FF9800", t_auth:"#9C27B0", t_vpn:"#009688", t_mon:"#795548", t_plat:"#607D8B", t_ui:"#E91E63", t_perf:"#3F51B5" };
+var THEMES={dark:{BG:"#0e0d20",CD:"#161530",BD:"#2d2856",TX:"#E1EAF9",TM:"#9b9abb",TD:"#6a6890"},light:{BG:"#f5f3f0",CD:"#ffffff",BD:"#d8d4ce",TX:"#1a1a2e",TM:"#5a5870",TD:"#8a8898"}};
+var O="#FF5A1A",Ob="#E77C06",O2="#ff7a4a",O3="#ff9a6a",O4="#cc4815";
+var CE="#4a9ec8",CE2="#3a7ea0",CC="#e05a2a",CS="#9a7ac0",CS2="#7a5aa0",CS3="#b490d0",CR="#c89030";
+var SC={"classic":"#5a8aaf","vpp":"#d06040","both":"#8a8aaa"};
+var SL={"classic":"Classic","vpp":"VPP","both":"Both"};
+var TEAM_COLORS={"t_net":"#2196F3","t_fw":"#F44336","t_sec":"#FF9800","t_auth":"#9C27B0","t_vpn":"#009688","t_mon":"#795548","t_plat":"#607D8B","t_ui":"#E91E63","t_perf":"#3F51B5"};
 
-const LAYERS = [
-  { id:"mgmt", label:"MANAGEMENT PLANE", desc:"UI, API, отчёты, аудит", color:O2 },
-  { id:"ctrl", label:"CONTROL PLANE",    desc:"Конфигурация: файрвол, аутентификация, сеть, безопасность, VPN", color:O3 },
-  { id:"data", label:"DATA PLANE",       desc:"Обработка трафика: VPP, eBPF, Suricata, Squid, DPI", color:O }
+var LAYERS=[
+  {id:"mgmt",label:"MANAGEMENT PLANE",desc:"UI, API, отчёты, аудит",color:O2},
+  {id:"ctrl",label:"CONTROL PLANE",desc:"Конфигурация: файрвол, аутентификация, сеть, безопасность, VPN",color:O3},
+  {id:"data",label:"DATA PLANE",desc:"Обработка трафика: VPP, eBPF, Suricata, Squid, DPI",color:O}
 ];
-const LAYER_DESC = {
-  mgmt:"Уровень управления и наблюдаемости.\n\nЕдинственная точка взаимодействия администратора и внешних систем с NGFW. Компоненты не участвуют в обработке трафика — читают конфигурацию из etcd, записывают изменения обратно в etcd, визуализируют аналитику из ClickHouse.",
-  ctrl:"Уровень конфигурации и бизнес-логики.\n\nОпределяет правила игры: что фильтровать, кого пускать, куда маршрутизировать. Бэкенды принимают настройки от Management Plane, проверяют и записывают в etcd. Data Plane наблюдает за изменениями через watch и автоматически применяет конфигурацию.",
-  data:"Уровень обработки трафика.\n\nКаждый пакет обрабатывается здесь. Daemon'ы ОС (Suricata, Squid, Unbound, strongSwan, FRRouting) и высокопроизводительные C/C++ компоненты (VPP, eBPF, eCAP, nDPI).\n\nТри стадии:\n1. Предварительная — eBPF/XDP, QoS\n2. МСЭ — DNAT, INPUT, FORWARD, IPS, DPI\n3. Завершающая — SNAT, VPN-шифрование",
-  infra:"Инфраструктурный уровень — фундамент системы.\n\nЛицензирование, обновления, резервное копирование, сертификаты, VCE, кластеризация и хранилища данных."
+var LAYER_DESC={
+  mgmt:"Уровень управления и наблюдаемости.\n\nЕдинственная точка взаимодействия администратора и внешних систем с NGFW. Компоненты Management Plane не участвуют в обработке сетевого трафика — читают конфигурацию из etcd, записывают изменения обратно в etcd, визуализируют аналитику из ClickHouse.\n\nВключает:\n— Веб-интерфейс администратора с ролевой моделью и 2FA\n— Личный кабинет пользователя\n— REST API на основе OpenAPI\n— Мониторинг состояния сервера\n— Отчёты и журналы\n— Аудит действий администраторов",
+  ctrl:"Уровень конфигурации и бизнес-логики.\n\nОпределяет правила игры: что фильтровать, кого пускать, куда маршрутизировать. Бэкенды принимают настройки от Management Plane, проверяют корректность и записывают в etcd. Data Plane наблюдает за изменениями в etcd через watch и автоматически применяет конфигурацию.\n\nНе обрабатывает трафик напрямую.",
+  data:"Уровень обработки трафика.\n\nКаждый пакет, проходящий через NGFW, обрабатывается здесь. Включает daemon'ы ОС (Suricata, Squid, Unbound, strongSwan, FRRouting) и высокопроизводительные C/C++ компоненты (VPP, eBPF, eCAP, nDPI).\n\nТри стадии:\n1. Предварительная — аппаратная фильтрация, eBPF/XDP, QoS\n2. Межсетевой экран — DNAT, INPUT, FORWARD, IPS, DPI\n3. Завершающая — SNAT, VPN-шифрование, отправка",
+  infra:"Инфраструктурный уровень — фундамент системы.\n\nОбеспечивает работу всего остального: базовые настройки сервера, лицензирование, обновления, резервное копирование, сертификаты, виртуальные контексты (VCE), кластеризацию и хранилища данных."
 };
-const DOMS = {
-  ui:    { l:"Веб-интерфейс",  ly:"mgmt", c:O2 },
-  rpt:   { l:"Отчёты",        ly:"mgmt", c:O3 },
-  api_d: { l:"API/Мониторинг",ly:"mgmt", c:O  },
-  auth_c:{ l:"Аутентификация",ly:"ctrl", c:O2 },
-  fw_c:  { l:"Файрвол",       ly:"ctrl", c:O  },
-  net_c: { l:"Сеть",          ly:"ctrl", c:O3 },
-  sec_c: { l:"Безопасность",  ly:"ctrl", c:Ob },
-  vpn_c: { l:"VPN",           ly:"ctrl", c:O4 },
-  rt_c:  { l:"Маршрутизация", ly:"ctrl", c:O2 },
-  dp_core:{ l:"Ядро DP",      ly:"data", c:O  },
-  dp_ips: { l:"IPS/Прокси",   ly:"data", c:Ob },
-  dp_dpi: { l:"DPI/Стат.",    ly:"data", c:O4 },
-  dp_acl: { l:"ACL/Routing",  ly:"data", c:O2 },
-  sys_i:  { l:"Ядро",         ly:"infra",c:O3 },
-  ha_i:   { l:"HA",           ly:"infra",c:O2 },
-  db_i:   { l:"Хранилища",    ly:"infra",c:"#8888aa" }
+var DOMS={
+  ui:{l:"Веб-интерфейс",ly:"mgmt",c:O2},
+  rpt:{l:"Отчёты",ly:"mgmt",c:O3},
+  api_d:{l:"API/Мониторинг",ly:"mgmt",c:O},
+  auth_c:{l:"Аутентификация",ly:"ctrl",c:O2},
+  fw_c:{l:"Файрвол",ly:"ctrl",c:O},
+  net_c:{l:"Сеть",ly:"ctrl",c:O3},
+  sec_c:{l:"Безопасность",ly:"ctrl",c:Ob},
+  vpn_c:{l:"VPN",ly:"ctrl",c:O4},
+  rt_c:{l:"Маршрутизация",ly:"ctrl",c:O2},
+  dp_core:{l:"Ядро DP",ly:"data",c:O},
+  dp_ips:{l:"IPS/Прокси",ly:"data",c:Ob},
+  dp_dpi:{l:"DPI/Стат.",ly:"data",c:O4},
+  dp_acl:{l:"ACL/Routing",ly:"data",c:O2},
+  sys_i:{l:"Ядро",ly:"infra",c:O3},
+  ha_i:{l:"HA",ly:"infra",c:O2},
+  db_i:{l:"Хранилища",ly:"infra",c:"#8888aa"}
 };
-const DOM_DESC = {
-  ui:"Веб-интерфейс администратора (web-backend) — Nginx + aiohttp. Ролевая модель: суперадминистратор, администратор МСЭ, ИБ, аудитор. 2FA: TOTP, SMS, Multifactor.\n\nЛичный кабинет пользователя (user-cabinet-backend) — портал самообслуживания: смена пароля, VPN-профили, SSL VPN портал.",
-  rpt:"REST API (rest-api-backend) — OpenAPI, SIEM/SOAR/IaC интеграции.\n\nМониторинг (monitor-backend) — CPU/RAM/диски/интерфейсы → ClickHouse. Zabbix-agent, SNMP v2c/v3.",
-  api_d:"Отчёты (reports-backend) — конструктор из ClickHouse. CSV/PDF, авторассылка.\n\nАудит (audit-backend) — diff «было→стало» в JSON, TTL 365 дней, ФСТЭК/ФСБ.\n\nЖурналы (logs-backend) — systemd journal → ClickHouse, Syslog RFC5424, CEF.",
-  auth_c:"auth-backend: captive portal, SSO Kerberos/NTLM, IP/MAC, 2FA.\nad-backend: LDAP/LDAPS, Kerberos, NTLM, SQLite-кэш.\nald-backend: ALD Pro, FreeIPA.\nuser-backend: локальные учётки, bcrypt.\nweb-authd: iptables REDIRECT → captive portal.",
-  fw_c:"firewall-backend: Stateful Inspection, FORWARD/INPUT/DNAT/SNAT, профили безопасности, зоны.\nalias-backend: 38+ типов объектов, alias-lib импортируют 30+ бэкендов.\nacl-backend: трансляция МСЭ → eBPF maps / VPP ACL.\nvpp-backend: конфигурация VPP через Python API.",
-  net_c:"l2-manager: Ethernet, VLAN 802.1Q, Bond (LACP), Bridge, KNI.\ndns-backend: Unbound — рекурсивный, форвардер, DoH, DNSSEC.\ndhcp-server-backend: пулы, резервирование MAC, DHCP relay.\nnetscan-backend: ARP-сканирование, OS fingerprinting.",
-  sec_c:"content-filter-backend: 145 категорий URL (RocksDB).\nsuricata-backend: ET Open/Pro, Snort, IPS-профили.\nav-backend: ClamAV / Kaspersky SDK.\nwaf-backend: ModSecurity + OWASP CRS.\nproxy-backend: Squid TPROXY / SSL Bump.\nreverse-backend: Nginx обратный прокси, Let's Encrypt.",
-  vpn_c:"vpn-servers-backend: IKEv2/IPSec, L2TP/IPSec, SSTP.\nipsec-backend: site-to-site, IKEv1/v2, DPD, PFS, NAT-T.\ngost-vpn-backend: ГОСТ Р 34.12-2015.\nagent-backend: Ideco Client, push-профили.\nwireguard-backend: WireGuard, QR-коды.",
-  rt_c:"routing-backend: FRRouting — PBR, статика, BGP, OSPF, балансировка каналов.\nmail-backend: Postfix SMTP relay, DKIM, SPF, TLS.",
-  dp_core:"VPP: userspace сетевой стек (DPDK/AF_XDP), пакеты пачками, KNI → Suricata/Squid/FRRouting.\nUnbound: DNS daemon — рекурсивный/форвардер, кэш, DoH, DNSSEC.\nISC DHCP: DHCP daemon — пулы, MAC-резервирование, relay.",
-  dp_ips:"Suricata: IPS inline (NFQUEUE), ET Open/Pro, Drop/Alert → ClickHouse.\nSquid: HTTP/S прокси (TPROXY), SSL Bump, платформа для eCAP.\necap-av: антивирус in-process (ClamAV/Kaspersky через Unix socket).\necap-urls: URL lookup в RocksDB in-process.\nModSecurity: WAF в связке с Nginx.",
-  dp_dpi:"app-control-nfq: nDPI, 300+ приложений, NFQUEUE → flow-stat-server.\nflow-stat-server: ring buffer агрегации.\nflow-stat-exporter: batch insert в ClickHouse.\ntrafmond: conntrack + DNS-обогащение.",
-  dp_acl:"bpf-acl-rules: eBPF/XDP до сетевого стека, eBPF maps (hash, LPM).\nideco-nflog: NFLOG (libnetfilter_log) → ClickHouse.\nstrongSwan: charon, IKEv2/L2TP, site-to-site.\nFRRouting: zebra/bgpd/ospfd.\nkeepalived: VRRP, Active-Passive heartbeat."
+var DOM_DESC={
+  ui:"Основной интерфейс для работы с NGFW.\n\nВеб-интерфейс администратора (web-backend) — полная панель управления. Ролевая модель: суперадминистратор, администратор МСЭ, администратор ИБ, аудитор. 2FA: TOTP, SMS, Multifactor. Технически: Nginx + aiohttp.\n\nЛичный кабинет пользователя (user-cabinet-backend) — портал самообслуживания: смена пароля, статистика трафика, скачивание VPN-профилей, SSL VPN портал.",
+  rpt:"Программный интерфейс и наблюдаемость.\n\nREST API (rest-api-backend) — OpenAPI, покрывает все функции NGFW. Сценарии: SIEM, SOAR, DevOps/IaC (Terraform, Ansible). API-ключи, rate limiting.\n\nМониторинг (monitor-backend) — CPU, RAM, диски, интерфейсы. Zabbix-agent, SNMP v2c/v3. Healthcheck всех сервисов.",
+  api_d:"Аналитика, журналирование и аудит.\n\nОтчёты (reports-backend) — конструктор отчётов из ClickHouse. Журнал МСЭ, веб-трафик, IPS-алерты, DPI, загруженность каналов. Экспорт CSV/PDF, рассылка по расписанию.\n\nАудит (audit-backend) — нередактируемый лог действий администраторов. Diff «было→стало» в JSON. TTL 365 дней. ФСТЭК/ФСБ.\n\nЖурналы (logs-backend) — systemd journal → ClickHouse. Syslog RFC 5424, CEF для SIEM.",
+  auth_c:"Идентификация пользователей.\n\nАвторизация — обязательное условие для доступа в интернет (не нужна для работы внутри LAN). Сессия привязана к IP.\n\nauth-backend: captive portal, SSO, Ideco Client, IP/MAC, подсеть, 2FA.\nad-backend: LDAP/LDAPS, Kerberos SSO, NTLM, SQLite-кэш.\nald-backend: ALD Pro, FreeIPA.\nuser-backend: локальные учётки, SQLite, bcrypt.\nweb-authd: captive portal daemon, iptables REDIRECT.",
+  fw_c:"Управление правилами фильтрации трафика.\n\nfirewall-backend: stateful inspection, таблицы FORWARD/INPUT/DNAT/SNAT, профили безопасности (DPI, IPS), зоны.\nalias-backend: объектная модель (38+ типов). IP, FQDN, сервисы, расписания, зоны AD/ALD. alias-lib импортируют 30+ бэкендов.\nacl-backend: трансляция правил МСЭ в eBPF maps или VPP ACL plugin.\nvpp-backend: конфигурация VPP через Python API.",
+  net_c:"Сетевые сервисы.\n\nl2-manager: Ethernet, VLAN 802.1Q, Bond (LACP), Bridge. KNI-интерфейсы для VPP.\ndns-backend: Unbound — рекурсивный резолвер, форвардер, DoH, DNSSEC.\ndhcp-server-backend: пулы адресов, резервирование по MAC, DHCP relay.\nnetscan-backend: ARP-сканирование, OS fingerprinting.",
+  sec_c:"Конфигурация модулей безопасности.\n\ncontent-filter-backend: 145 категорий URL (RocksDB), морфологические словари, Safe Search.\nsuricata-backend: IPS-профили, ET Open/Pro, Snort-совместимые сигнатуры.\nav-backend: ClamAV / Kaspersky SDK.\nwaf-backend: ModSecurity + OWASP CRS.\nproxy-backend: Squid TPROXY/SSL Bump.\nreverse-backend: Nginx обратный прокси, Let's Encrypt.",
+  vpn_c:"VPN-подключения.\n\nvpn-servers-backend: IKEv2/IPSec, L2TP/IPSec, SSTP. Автогенерация профилей.\nipsec-backend: IPSec site-to-site. IKEv1/v2, DPD, PFS, NAT-T.\ngost-vpn-backend: ГОСТ Р 34.12-2015, Кузнечик/Магма.\nagent-backend: Ideco Client, push-профили.\nwireguard-backend: WireGuard, QR-коды.",
+  rt_c:"Маршрутизация и почта.\n\nrouting-backend: FRRouting — PBR, статика, BGP, OSPF, балансировка каналов.\nmail-backend: Postfix SMTP relay, DKIM, SPF, TLS.",
+  dp_core:"Ядро DP.\n\nVPP: userspace сетевой стек, DPDK/AF_XDP, обработка пачками (vectors). Конфигурация через vpp-backend → etcd.\nUnbound: DNS daemon. Конфигурация через dns-backend → etcd.\nISC DHCP: DHCP daemon. Конфигурация через dhcp-server-backend → etcd.",
+  dp_ips:"IPS, прокси, WAF.\n\nSuricata: IPS inline (NFQUEUE), ET rules, Drop/Alert → ClickHouse.\nSquid: HTTP/S прокси (TPROXY), SSL Bump, платформа для eCAP.\necap-av: антивирус in-process (ClamAV/Kaspersky через Unix socket).\necap-urls: URL lookup в RocksDB, in-process.\nModSecurity: WAF в связке с Nginx.",
+  dp_dpi:"DPI и статистика.\n\napp-control-nfq: nDPI, 300+ приложений, NFQUEUE.\nflow-stat-server: приём flow-данных от DPI, ring buffer.\nflow-stat-exporter: batch-вставки в ClickHouse (clickhouse-cpp).\ntrafmond: conntrack, обогащение DNS.",
+  dp_acl:"ACL, маршрутизация, VPN, HA.\n\nbpf-acl-rules: eBPF/XDP до сетевого стека, eBPF maps.\nideco-nflog: NFLOG → ClickHouse (libnetfilter_log).\nstrongSwan: charon, IKEv2/L2TP, site-to-site.\nFRRouting: zebra, bgpd, ospfd.\nkeepalived: VRRP, Active-Passive heartbeat."
 };
 
-// DP-to-DP protocol links (from code)
-const DP_LINKS = [
-  { from:"vpp_dp",      to:"suricata_dp",    proto:"NFQUEUE",         desc:"VPP передаёт пакеты с IPS-профилем через NFQUEUE в Suricata для L7-инспекции" },
-  { from:"vpp_dp",      to:"squid_dp",       proto:"KNI / TPROXY",    desc:"VPP передаёт HTTP/S трафик в Squid через KNI-интерфейс (TPROXY)" },
-  { from:"vpp_dp",      to:"appctrl",        proto:"NFQUEUE",         desc:"VPP передаёт трафик в app-control-nfq через NFQUEUE для DPI (nDPI)" },
-  { from:"vpp_dp",      to:"nflog",          proto:"NFLOG (netlink)", desc:"netfilter отправляет события accept/drop через NFLOG target → ideco-nflog" },
-  { from:"squid_dp",    to:"ecap_av",        proto:"libecap in-proc", desc:"Squid вызывает ecap-av in-process через libecap при скачивании файла" },
-  { from:"squid_dp",    to:"ecap_urls",      proto:"libecap in-proc", desc:"Squid вызывает ecap-urls in-process через libecap при каждом HTTP/S запросе" },
-  { from:"ecap_av",     to:"suricata_dp",    proto:"Unix socket",     desc:"ecap-av отправляет файлы на проверку в ClamAV/Kaspersky через Unix socket (clamd)" },
-  { from:"appctrl",     to:"flowsrv",        proto:"IPC / pipe",      desc:"app-control-nfq передаёт flow-данные (src/dst, приложение, объём) в flow-stat-server" },
-  { from:"flowsrv",     to:"flowexp",        proto:"ring buffer",     desc:"flow-stat-server агрегирует данные в ring buffer → flow-stat-exporter batch insert" },
-  { from:"strongswan_dp",to:"vpnauthd",      proto:"xauth / EAP",    desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin при подключении IKEv2/L2TP" },
-  { from:"keepalived_dp",to:"frr_dp",        proto:"VRRP / netlink", desc:"keepalived управляет виртуальными IP, FRRouting обновляет таблицы маршрутизации" }
+// DP-to-DP protocol links (from code analysis)
+var DP_LINKS=[
+  {from:"vpp_dp",   to:"suricata_dp", proto:"NFQUEUE",          desc:"VPP передаёт пакеты с IPS-профилем в Suricata через NFQUEUE для L7-инспекции"},
+  {from:"vpp_dp",   to:"squid_dp",    proto:"KNI / TPROXY",     desc:"VPP передаёт HTTP/S трафик в Squid через KNI-интерфейс и TPROXY"},
+  {from:"vpp_dp",   to:"appctrl",     proto:"NFQUEUE",          desc:"VPP передаёт трафик в app-control-nfq через NFQUEUE для DPI (nDPI)"},
+  {from:"vpp_dp",   to:"nflog",       proto:"NFLOG (netlink)",  desc:"netfilter отправляет события accept/drop через NFLOG target → ideco-nflog"},
+  {from:"squid_dp", to:"ecap_av",     proto:"libecap in-proc",  desc:"Squid вызывает ecap-av in-process через libecap при скачивании файла"},
+  {from:"squid_dp", to:"ecap_urls",   proto:"libecap in-proc",  desc:"Squid вызывает ecap-urls in-process через libecap при каждом HTTP/S запросе"},
+  {from:"ecap_av",  to:"suricata_dp", proto:"Unix socket",      desc:"ecap-av отправляет файлы на проверку ClamAV/Kaspersky через Unix socket (clamd)"},
+  {from:"appctrl",  to:"flowsrv",     proto:"IPC / pipe",       desc:"app-control-nfq передаёт flow-данные (src/dst, приложение, объём) в flow-stat-server"},
+  {from:"flowsrv",  to:"flowexp",     proto:"ring buffer",      desc:"flow-stat-server агрегирует данные и передаёт в flow-stat-exporter batch-вставками"},
+  {from:"strongswan_dp", to:"vpnauthd", proto:"xauth / EAP",   desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin при подключении IKEv2/L2TP"},
+  {from:"keepalived_dp", to:"frr_dp",  proto:"VRRP / netlink", desc:"keepalived управляет виртуальными IP, FRRouting обновляет таблицы при переключении"}
 ];
 
-const DB_PERM = ["system","alias","fw","auth","web","reports","monitor","routing","dns_be","dhcp_be","proxy_be","cf","suricata_be","av","waf_be","reverse","cert","vpnsrv","ipsec","gostvpn","agent","user","ad","ald","audit","license","backup","cluster","sysupd","mail","vce","cc","restapi","cabinet","cfw","shaper","netscan","igmp","acl","vpp_be","l2","logs","servers","wg","unbound_dp","dhcpd_dp","strongswan_dp","frr_dp","keepalived_dp"];
-const DB_RUN  = ["vpp_be","l2","acl","cluster","auth","system","monitor","fw","routing","dhcp_be","dns_be","suricata_be","proxy_be","vpnsrv","ipsec","cf","vpp_dp","unbound_dp","strongswan_dp","frr_dp","keepalived_dp"];
-const DB_CH   = ["web","cabinet","monitor","reports","audit","logs","auth","suricata_be","waf_be","acl","nflog","vpp_be","flowexp","cc","suricata_dp","flowexp","appctrl"];
-const DB_SQ_AD  = ["ad"];
-const DB_SQ_USR = ["user"];
-const DB_SQ_IPS = ["suricata_be","suricata_dp"];
-const DB_RK     = ["cf","ecap_urls"];
+var DB_PERM_BASE=["system","alias","fw","auth","web","reports","monitor","routing","dns_be","dhcp_be","proxy_be","cf","suricata_be","av","waf_be","reverse","cert","vpnsrv","ipsec","gostvpn","agent","user","ad","ald","audit","license","backup","cluster","sysupd","mail","vce","cc","restapi","cabinet","cfw","shaper","netscan","igmp","acl","vpp_be","l2","logs","servers","wg"];
+var DB_PERM_DP=["unbound_dp","dhcpd_dp","strongswan_dp","frr_dp","keepalived_dp"];
+var DB_PERM=DB_PERM_BASE.concat(DB_PERM_DP);
 
-const LINK_DESC = { alias:"Объекты",auth:"Аутент.",cert:"Серт.",cluster:"Кластер",license:"Лицензии",vce:"VCE",system:"Системные",firewall:"Правила МСЭ",routing:"Маршруты",l2manager:"Интерфейсы",proxy:"Прокси","content-filter":"URL",av:"AV",reports:"Отчёты",alerts:"Алерты","inet-access":"Доступ","ad-users":"AD",sessions:"Сессии","vpn-servers":"VPN",agent:"Client",ipsec:"IPSec","gost-vpn":"ГОСТ","dhcp-server":"DHCP",suricata:"IPS",waf:"WAF",servers:"Серверы","vpn-authd":"VPN auth",vpp:"VPP" };
-const DB_LINK_DESC = {
-  db_perm:"etcd PERMANENT — постоянная конфигурация NGFW.\n\nПравила МСЭ, объекты alias, настройки модулей, учётные записи. Сохраняется при перезагрузке.\n\nПаттерн взаимодействия: write → watch → react. Бэкенды общаются через etcd, не напрямую.",
-  db_run: "etcd RUNTIME — оперативные данные.\n\nПересоздаётся при старте: link up/down, скорость интерфейсов, MTU, активные сессии авторизации, статусы бэкендов, текущие VPN-соединения.",
-  db_ch:  "ClickHouse — колоночная СУБД для аналитики и логов.\n\nЖурнал МСЭ (accept/drop), DNS-запросы, IPS-алерты, WAF-события, DPI-статистика, веб-трафик по пользователям. 14+ бэкендов пишут данные.",
-  db_sq_ad:"SQLite: AD cache.\n\nКэш пользователей и групп Active Directory. Аутентификация при недоступности DC. Инкрементальная синхронизация по USN Changed.",
-  db_sq_usr:"SQLite: Users — локальные учётные записи.\n\nПользователи и группы без AD/ALD. Пароли в bcrypt. Квоты трафика.",
-  db_sq_ips:"SQLite: IPS rules — пользовательские правила IPS.\n\nSnort-совместимые сигнатуры из suricata-backend. Загружаются Suricata наравне с ET Open/Pro.",
-  db_rk:"RocksDB — база URL-категорий контент-фильтра.\n\n145 категорий, миллионы URL. Lookup за микросекунды — критично для inline-фильтрации в eCAP. Обновляется из облака Ideco."
+var DB_RUN_BASE=["vpp_be","l2","acl","cluster","auth","system","monitor","fw","routing","dhcp_be","dns_be","suricata_be","proxy_be","vpnsrv","ipsec","cf"];
+var DB_RUN_DP=["vpp_dp","unbound_dp","strongswan_dp","frr_dp","keepalived_dp"];
+var DB_RUN=DB_RUN_BASE.concat(DB_RUN_DP);
+
+var DB_CH=["web","cabinet","monitor","reports","audit","logs","auth","suricata_be","waf_be","acl","nflog","vpp_be","flowexp","cc","suricata_dp","nflog","flowexp","appctrl"];
+var DB_SQ_AD=["ad"];
+var DB_SQ_USR=["user"];
+var DB_SQ_IPS=["suricata_be","suricata_dp"];
+var DB_RK=["cf","ecap_urls"];
+
+var LINK_DESC={"alias":"Объекты","auth":"Аутент.","cert":"Серт.","cluster":"Кластер","license":"Лицензии","vce":"VCE","system":"Системные","firewall":"Правила МСЭ","routing":"Маршруты","l2manager":"Интерфейсы","proxy":"Прокси","content-filter":"URL","av":"AV","reports":"Отчёты","alerts":"Алерты","inet-access":"Доступ","ad-users":"AD","sessions":"Сессии","vpn-servers":"VPN","agent":"Client","ipsec":"IPSec","gost-vpn":"ГОСТ","dhcp-server":"DHCP","suricata":"IPS","waf":"WAF","servers":"Серверы","vpn-authd":"VPN auth","vpp":"VPP"};
+var DB_LINK_DESC={
+  db_perm:"etcd PERMANENT — постоянная конфигурация NGFW.\n\nХранит правила МСЭ, объекты alias, настройки всех модулей, учётные записи. Сохраняется при перезагрузке.\n\nВсе Python-бэкенды подключены через общий Backend class. Основной паттерн: write → watch → react. Через etcd бэкенды общаются между собой без прямых API-вызовов.",
+  db_run:"etcd RUNTIME — оперативные данные.\n\nПересоздаётся при каждом старте. Хранит текущее состояние: link up/down, скорость интерфейсов, MTU, активные сессии авторизации, статусы бэкендов, текущие VPN-соединения.\n\nИспользуется для отображения реального состояния системы в веб-интерфейсе.",
+  db_ch:"ClickHouse — колоночная СУБД для аналитики и логов.\n\nХранит: журнал МСЭ (accept/drop), DNS-запросы, IPS-алерты, WAF-события, DPI-статистику по приложениям, веб-трафик по пользователям.\n\n14+ бэкендов пишут данные. reports-backend читает для построения отчётов. TTL и Materialized Views для быстрой агрегации.",
+  db_sq_ad:"SQLite: AD cache — кэш пользователей и групп Active Directory.\n\nПозволяет аутентифицировать пользователей при недоступности контроллера домена. Обновляется инкрементально по USN Changed.",
+  db_sq_usr:"SQLite: Users — локальные учётные записи.\n\nПользователи и группы, не связанные с AD/ALD. Пароли хранятся в bcrypt. Квоты трафика.",
+  db_sq_ips:"SQLite: IPS rules — пользовательские правила IPS.\n\nSnort-совместимые сигнатуры, созданные администратором вручную в suricata-backend. Загружаются Suricata наравне с ET Open/Pro.",
+  db_rk:"RocksDB — база URL-категорий контент-фильтра.\n\n145 категорий, миллионы URL. Lookup за микросекунды — критично для inline-фильтрации в eCAP-модуле Squid.\n\nОбновляется из облака Ideco по подписке. Используется ecap-urls (C++) и cf-backend (Python)."
 };
 
-const SCENARIOS = [
-  { id:"sc_auth", name:"Авторизация пользователя", steps:[
-    { comp:"webauthd",   label:"1. Перехват HTTP",    desc:"iptables REDIRECT перехватывает HTTP неавторизованного пользователя. web-authd отправляет HTTP 302 на страницу captive portal.\n\nПротокол: iptables REDIRECT → HTTP 302" },
-    { comp:"auth",       label:"2. Аутентификация",   desc:"Пользователь вводит логин/пароль. auth-backend проверяет метод: captive portal, SSO Kerberos, IP/MAC, Ideco Client.\n\nПротокол: HTTP POST → auth-backend (aiohttp)" },
-    { comp:"ad",         label:"3. Проверка в AD",    desc:"ad-backend проверяет учётные данные через LDAP/LDAPS. При недоступности AD — использует SQLite-кэш.\n\nПротокол: LDAP/LDAPS 389/636 → контроллер домена" },
-    { comp:"db_sq_ad",   label:"4. SQLite кэш",       desc:"Кэш пользователей и групп AD. При недоступности DC аутентификация проходит по кэшированным данным.\n\nТип: SQLite (ad-backend)" },
-    { comp:"db_run",     label:"5. Сессия в etcd",    desc:"auth-backend создаёт запись в etcd RUNTIME: IP ↔ пользователь ↔ группы. Сессия видна всем компонентам.\n\nПротокол: etcd put (gRPC)" },
-    { comp:"fw",         label:"6. Правила МСЭ",      desc:"firewall-backend читает правила FORWARD для пользователя/группы из etcd PERMANENT.\n\nПротокол: etcd get/watch (gRPC)" },
-    { comp:"acl",        label:"7. Загрузка ACL",     desc:"acl-backend транслирует правила в eBPF maps (классический) или VPP ACL plugin (VPP). Пакеты пользователя пропускаются.\n\nПротокол: bpf() syscall / VPP API" }
+var SCENARIOS=[
+  {id:"sc_auth",name:"Авторизация пользователя",steps:[
+    {comp:"webauthd",label:"1. Перехват HTTP",desc:"iptables REDIRECT перехватывает HTTP-трафик неавторизованного пользователя. web-authd отправляет HTTP 302 на страницу captive portal.\n\nПротокол: iptables REDIRECT → HTTP 302"},
+    {comp:"auth",label:"2. Аутентификация",desc:"Пользователь вводит логин/пароль. auth-backend проверяет метод: веб-форма, SSO Kerberos, IP/MAC, Ideco Client.\n\nПротокол: HTTP POST → auth-backend (aiohttp)"},
+    {comp:"ad",label:"3. Проверка в AD",desc:"ad-backend проверяет учётные данные через LDAP/LDAPS. При недоступности AD — использует SQLite-кэш.\n\nПротокол: LDAP/LDAPS 389/636 → контроллер домена"},
+    {comp:"db_sq_ad",label:"4. SQLite кэш",desc:"Кэш пользователей и групп AD. При недоступности DC аутентификация проходит по кэшированным данным.\n\nТип: файловая БД SQLite (ad-backend)"},
+    {comp:"db_run",label:"5. Сессия в etcd",desc:"После успешной аутентификации auth-backend создаёт запись в etcd RUNTIME: IP ↔ пользователь ↔ группы. Сессия видна всем компонентам.\n\nПротокол: etcd put (gRPC)"},
+    {comp:"fw",label:"6. Правила МСЭ",desc:"firewall-backend читает правила FORWARD для пользователя/группы из etcd PERMANENT. Определяет права доступа.\n\nПротокол: etcd get/watch (gRPC)"},
+    {comp:"acl",label:"7. Загрузка ACL",desc:"acl-backend транслирует правила в eBPF maps (классический) или VPP ACL plugin (VPP). С этого момента пакеты пользователя пропускаются на уровне данных.\n\nПротокол: bpf() syscall / VPP API"}
   ]},
-  { id:"sc_cf", name:"Контент-фильтр (URL)", steps:[
-    { comp:"vpp_dp",   label:"1. Пакет → Squid",    desc:"VPP направляет HTTP/S трафик в Squid через KNI и TPROXY.\n\nПротокол: KNI / TPROXY (Linux networking)" },
-    { comp:"squid_dp", label:"2. Squid принимает",  desc:"Squid в прозрачном режиме. Для HTTPS — SSL Bump (TLS MITM) для получения полного URL.\n\nПротокол: HTTP CONNECT / SSL Bump" },
-    { comp:"ecap_urls",label:"3. eCAP URL lookup",  desc:"Squid вызывает ecap-urls in-process через libecap. Lookup в RocksDB.\n\nПротокол: libecap (in-process, C++)" },
-    { comp:"db_rk",    label:"4. RocksDB lookup",   desc:"145 категорий, миллионы URL. Lookup за микросекунды: URL/домен → ID категории.\n\nТип: embedded RocksDB" },
-    { comp:"cf",       label:"5. Проверка профиля", desc:"content-filter-backend: какие категории запрещены для каких групп.\n\nПротокол: etcd read (PERMANENT)" },
-    { comp:"squid_dp", label:"6. Блок или пропуск", desc:"Запрещена → HTTP 403 со страницей блокировки. Разрешена → proxy forward.\n\nПротокол: HTTP 403 / HTTP proxy forward" },
-    { comp:"db_ch",    label:"7. Лог в ClickHouse", desc:"Событие (URL, пользователь, категория, действие) → ClickHouse.\n\nПротокол: clickhouse-driver TCP, batch insert" }
+  {id:"sc_cf",name:"Контент-фильтр (URL)",steps:[
+    {comp:"vpp_dp",label:"1. Пакет → Squid",desc:"HTTP/HTTPS пакет приходит на NGFW. VPP (или ядро Linux) направляет веб-трафик в Squid через KNI и TPROXY.\n\nПротокол: KNI / TPROXY (Linux networking)"},
+    {comp:"squid_dp",label:"2. Squid принимает",desc:"Squid в прозрачном режиме. Для HTTPS выполняет SSL Bump — расшифровывает TLS, чтобы получить полный URL.\n\nПротокол: HTTP CONNECT / SSL Bump (TLS MITM)"},
+    {comp:"ecap_urls",label:"3. eCAP URL lookup",desc:"Squid вызывает ecap-urls in-process через libecap. ecap-urls извлекает URL из запроса и делает lookup в RocksDB.\n\nПротокол: libecap (in-process, без сетевых вызовов, C++)"},
+    {comp:"db_rk",label:"4. RocksDB lookup",desc:"145 категорий, миллионы URL. Lookup за микросекунды: URL/домен → ID категории.\n\nТип: embedded RocksDB key-value store"},
+    {comp:"cf",label:"5. Проверка профиля",desc:"content-filter-backend хранит настройки: какие категории запрещены для каких групп пользователей.\n\nПротокол: etcd read (PERMANENT)"},
+    {comp:"squid_dp",label:"6. Блок или пропуск",desc:"Если категория запрещена — Squid возвращает HTTP 403 со страницей блокировки. Если разрешена — запрос проксируется.\n\nПротокол: HTTP 403 / HTTP proxy forward"},
+    {comp:"db_ch",label:"7. Лог в ClickHouse",desc:"Событие (URL, пользователь, категория, действие, timestamp) записывается в ClickHouse через clickhouse-driver.\n\nПротокол: clickhouse-driver TCP, batch insert"}
   ]},
-  { id:"sc_ips", name:"IPS — обнаружение атаки", steps:[
-    { comp:"vpp_dp",      label:"1. Пакет → NFQUEUE",    desc:"Трафик с разрешающим правилом + IPS-профиль → NFQUEUE.\n\nПротокол: netfilter NFQUEUE target" },
-    { comp:"suricata_dp", label:"2. Suricata инспектирует",desc:"Suricata проверяет каждый пакет по сигнатурам ET Open/Pro.\n\nПротокол: NFQUEUE → libnetfilter_queue" },
-    { comp:"suricata_be", label:"3. Профили из etcd",     desc:"suricata-backend хранит IPS-профили в etcd. Suricata читает через watch.\n\nПротокол: etcd watch/get (gRPC)" },
-    { comp:"db_sq_ips",   label:"4. Пользовательские правила",desc:"Кастомные Snort-совместимые сигнатуры из SQLite.\n\nТип: SQLite (suricata-backend)" },
-    { comp:"suricata_dp", label:"5. Вердикт Drop/Alert",  desc:"Drop → NF_DROP (блокировка). Alert → NF_ACCEPT + событие.\n\nПротокол: NFQUEUE verdict" },
-    { comp:"db_ch",       label:"6. Алерт → ClickHouse",  desc:"IPS-алерт (сигнатура, severity, src/dst, timestamp) → ClickHouse.\n\nПротокол: clickhouse-driver, batch insert" },
-    { comp:"reports",     label:"7. Отчёт в UI",          desc:"reports-backend читает алерты из ClickHouse → веб-интерфейс.\n\nПротокол: ClickHouse SQL → HTTP JSON → браузер" }
+  {id:"sc_ips",name:"IPS — обнаружение атаки",steps:[
+    {comp:"vpp_dp",label:"1. Пакет → NFQUEUE",desc:"Трафик с разрешающим правилом МСЭ + IPS-профиль направляется в NFQUEUE.\n\nПротокол: netfilter NFQUEUE target"},
+    {comp:"suricata_dp",label:"2. Suricata инспектирует",desc:"Suricata получает пакет из NFQUEUE и проверяет по сигнатурам ET Open/Pro. Анализирует каждый пакет в рамках соединения (в отличие от МСЭ).\n\nПротокол: NFQUEUE → libnetfilter_queue"},
+    {comp:"suricata_be",label:"3. Профили из etcd",desc:"suricata-backend хранит конфигурацию IPS-профилей в etcd. Suricata читает при старте и при изменении через etcd watch.\n\nПротокол: etcd watch/get (gRPC)"},
+    {comp:"db_sq_ips",label:"4. Пользовательские правила",desc:"Кастомные Snort-совместимые сигнатуры хранятся в SQLite. Suricata загружает их наравне с ET-правилами.\n\nТип: SQLite (suricata-backend)"},
+    {comp:"suricata_dp",label:"5. Вердикт Drop/Alert",desc:"При совпадении сигнатуры: Drop — NF_DROP (пакет заблокирован), Alert — NF_ACCEPT (пакет пропущен, событие зафиксировано).\n\nПротокол: NFQUEUE verdict NF_DROP / NF_ACCEPT"},
+    {comp:"db_ch",label:"6. Алерт → ClickHouse",desc:"IPS-алерт (сигнатура, severity, src/dst, timestamp) записывается в ClickHouse.\n\nПротокол: clickhouse-driver TCP, batch insert"},
+    {comp:"reports",label:"7. Отчёт в UI",desc:"reports-backend читает алерты из ClickHouse и строит отчёт. Администратор видит атаки в веб-интерфейсе.\n\nПротокол: ClickHouse SQL → HTTP JSON → браузер"}
   ]},
-  { id:"sc_vpn", name:"VPN IKEv2 подключение", steps:[
-    { comp:"strongswan_dp",label:"1. IKE_SA_INIT",      desc:"Клиент инициирует IKEv2 handshake. charon выполняет Diffie-Hellman.\n\nПротокол: IKEv2 (UDP 500 / 4500)" },
-    { comp:"vpnauthd",     label:"2. Аутентификация",   desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin.\n\nПротокол: xauth / EAP-MSCHAPv2" },
-    { comp:"auth",         label:"3. Проверка через auth",desc:"vpn-authd → auth-backend. Проверка учётных данных, 2FA.\n\nПротокол: HTTP internal API (aiohttp)" },
-    { comp:"vpnsrv",       label:"4. VPN конфигурация", desc:"vpn-servers-backend: пул IP, маршруты для клиента, DNS.\n\nПротокол: etcd read (PERMANENT)" },
-    { comp:"db_perm",      label:"5. Данные из etcd",   desc:"strongSwan читает конфигурацию туннелей из etcd при старте и через watch.\n\nПротокол: etcd watch/get (gRPC)" },
-    { comp:"strongswan_dp",label:"6. CHILD_SA установлен",desc:"Установлена IPSec SA для шифрования. Клиент получает IP из пула.\n\nПротокол: IKEv2 CREATE_CHILD_SA → ESP (IP proto 50)" },
-    { comp:"db_run",       label:"7. Сессия в RUNTIME", desc:"Активное VPN-соединение записывается в etcd RUNTIME.\n\nПротокол: etcd put (gRPC)" }
+  {id:"sc_vpn",name:"VPN IKEv2 подключение",steps:[
+    {comp:"strongswan_dp",label:"1. IKE_SA_INIT",desc:"Клиент инициирует IKEv2 handshake. strongSwan (charon) выполняет Diffie-Hellman обмен.\n\nПротокол: IKEv2 (UDP 500 / UDP 4500 за NAT)"},
+    {comp:"vpnauthd",label:"2. Аутентификация",desc:"strongSwan вызывает vpn-authd через xauth/EAP plugin для проверки логина/пароля.\n\nПротокол: xauth / EAP-MSCHAPv2"},
+    {comp:"auth",label:"3. Проверка через auth",desc:"vpn-authd обращается к auth-backend. Проверка учётных данных (локальные, AD, RADIUS), 2FA если настроено.\n\nПротокол: HTTP internal API (aiohttp)"},
+    {comp:"vpnsrv",label:"4. VPN конфигурация",desc:"vpn-servers-backend предоставляет параметры: пул IP, маршруты для клиента, DNS-серверы.\n\nПротокол: etcd read (PERMANENT)"},
+    {comp:"db_perm",label:"5. Данные из etcd",desc:"strongSwan читает конфигурацию туннелей (IKE proposals, DH groups, шифрование) из etcd при старте и при изменении.\n\nПротокол: etcd watch/get (gRPC)"},
+    {comp:"strongswan_dp",label:"6. CHILD_SA установлен",desc:"После аутентификации устанавливается CHILD_SA — IPSec SA для шифрования трафика. Клиент получает IP из пула.\n\nПротокол: IKEv2 CREATE_CHILD_SA → ESP (IP proto 50)"},
+    {comp:"db_run",label:"7. Сессия в RUNTIME",desc:"Активное VPN-соединение записывается в etcd RUNTIME. Веб-интерфейс показывает подключённых пользователей.\n\nПротокол: etcd put (gRPC)"}
   ]},
-  { id:"sc_rule", name:"Изменение правила МСЭ", steps:[
-    { comp:"web",    label:"1. Создание в UI",   desc:"Администратор создаёт правило. web-backend валидирует данные.\n\nПротокол: HTTP POST → Nginx → web-backend (aiohttp)" },
-    { comp:"fw",     label:"2. Валидация",       desc:"firewall-backend проверяет объекты alias и профили безопасности.\n\nПротокол: etcd read (PERMANENT)" },
-    { comp:"db_perm",label:"3. Запись в etcd",   desc:"Правило сохраняется в etcd PERMANENT. Все подписчики (watch) уведомляются.\n\nПротокол: etcd put (gRPC, MVCC)" },
-    { comp:"acl",    label:"4. ACL watch → реакция",desc:"acl-backend через etcd watch разворачивает alias → пересчитывает ACL.\n\nПротокол: etcd watch stream (gRPC)" },
-    { comp:"bpf",    label:"5. Загрузка в eBPF", desc:"acl-backend загружает ACL в eBPF maps (hash map / LPM trie).\n\nПротокол: bpf() syscall → eBPF maps" },
-    { comp:"nflog",  label:"6. NFLOG → ClickHouse",desc:"ideco-nflog перехватывает accept/drop через libnetfilter_log → ClickHouse.\n\nПротокол: NFLOG netlink → libnetfilter_log → ClickHouse TCP" },
-    { comp:"audit",  label:"7. Запись в аудит",  desc:"audit-backend: кто/когда/что изменил, diff «было → стало» JSON → ClickHouse.\n\nПротокол: etcd watch → ClickHouse insert" }
+  {id:"sc_rule",name:"Изменение правила МСЭ",steps:[
+    {comp:"web",label:"1. Создание в UI",desc:"Администратор создаёт правило в веб-интерфейсе. web-backend валидирует данные.\n\nПротокол: HTTP POST → Nginx → web-backend (aiohttp)"},
+    {comp:"fw",label:"2. Валидация",desc:"firewall-backend проверяет объекты alias и привязанные профили безопасности (DPI, IPS).\n\nПротокол: etcd read (PERMANENT)"},
+    {comp:"db_perm",label:"3. Запись в etcd",desc:"Правило сохраняется в etcd PERMANENT. Атомарная операция. Все подписчики (watch) мгновенно уведомляются.\n\nПротокол: etcd put (gRPC, MVCC транзакция)"},
+    {comp:"acl",label:"4. ACL watch → реакция",desc:"acl-backend через etcd watch получает событие, разворачивает alias-объекты в конкретные IP, пересчитывает ACL.\n\nПротокол: etcd watch stream (gRPC)"},
+    {comp:"bpf",label:"5. Загрузка в eBPF",desc:"acl-backend загружает новые ACL в eBPF maps (hash map / LPM trie). eBPF в драйвере NIC немедленно применяет правила.\n\nПротокол: bpf() syscall → eBPF maps"},
+    {comp:"nflog",label:"6. NFLOG → ClickHouse",desc:"Новое правило начинает фиксировать события. ideco-nflog перехватывает accept/drop через libnetfilter_log → ClickHouse.\n\nПротокол: NFLOG netlink → libnetfilter_log → ClickHouse TCP"},
+    {comp:"audit",label:"7. Запись в аудит",desc:"audit-backend фиксирует: кто, когда, что изменил (diff «было → стало» JSON). ClickHouse, TTL 365 дней.\n\nПротокол: etcd watch → ClickHouse insert"}
   ]}
 ];
 
-const C = [
-  { id:"web",     n:"web-backend",           s:"Веб-интерфейс",  dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Nginx + aiohttp. Ролевая модель (суперадминистратор, МСЭ, ИБ, аудитор). 2FA: TOTP, SMS, Multifactor. Telegram push-уведомления.",det:["Nginx+aiohttp","2FA","Telegram"] },
-  { id:"cabinet", n:"user-cabinet-backend",  s:"Личный кабинет", dom:"ui",     sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Портал самообслуживания. Смена пароля, статистика трафика, VPN-профили (.ovpn, .mobileconfig). SSL VPN портал.",det:["VPN-профили","SSL VPN"] },
-  { id:"restapi", n:"rest-api-backend",      s:"REST API",       dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"OpenAPI. CRUD правил МСЭ, пользователей, VPN-конфигураций, объектов alias. SIEM, SOAR, DevOps/IaC (Terraform, Ansible). API-ключи, rate limiting.",det:["OpenAPI","SIEM/SOAR"] },
-  { id:"monitor", n:"monitor-backend",       s:"Мониторинг",     dom:"api_d",  sk:"both",    lang:"Python",fw:"aiohttp,pysnmp",desc:"CPU/RAM/диски/интерфейсы → ClickHouse. Zabbix-agent, SNMP v2c/v3. Healthcheck. Репутация IP через облако Ideco.",det:["Метрики→CH","Zabbix/SNMP"] },
-  { id:"reports", n:"reports-backend",       s:"Отчёты",         dom:"rpt",    sk:"both",    lang:"Python",fw:"clickhouse-driver",desc:"Конструктор отчётов из ClickHouse. Журнал МСЭ, веб-трафик, IPS-алерты, DPI, каналы. Экспорт CSV/PDF. Авторассылка.",det:["Конструктор","CSV/PDF"] },
-  { id:"audit",   n:"audit-backend",         s:"Аудит",          dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Нередактируемый аудит-лог. Diff «было→стало» JSON. ClickHouse, TTL 365 дней. ФСТЭК/ФСБ.",det:["Diff","ФСТЭК"] },
-  { id:"logs",    n:"logs-backend",          s:"Журналы",        dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",       desc:"systemd journal → ClickHouse. Syslog RFC5424, CEF (ArcSight, QRadar, Splunk). TCP/UDP.",det:["Syslog→CH","CEF"] },
-  { id:"servers", n:"servers-backend",       s:"Внешние серверы",dom:"rpt",    sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Конфигурация syslog-серверов (TCP/UDP, RFC5424, CEF), NTP-серверов, DNS upstream/DoH. Настройки в etcd PERMANENT.",det:["Syslog/NTP"] },
-  { id:"auth",    n:"auth-backend",          s:"Аутентификация", dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp,gssapi",desc:"Captive portal, SSO Kerberos/NTLM, Ideco Client, IP/MAC, подсеть. 2FA. Сессия привязана к IP. До 6 сессий на пользователя.",det:["SSO/NTLM","2FA"] },
-  { id:"ad",      n:"ad-backend",            s:"Active Directory",dom:"auth_c",sk:"both",    lang:"Python",fw:"ldap3",         desc:"LDAP/LDAPS, мульти-домен, инкрементальная синхронизация (USN Changed). Kerberos SSO, NTLM (Samba winbind). SQLite-кэш при недоступности DC.",det:["LDAP","Kerberos"] },
-  { id:"ald",     n:"ald-backend",           s:"ALD Pro",        dom:"auth_c", sk:"both",    lang:"Python",fw:"aiohttp",       desc:"ALD Pro и FreeIPA — LDAP, Kerberos SSO. Для Astra Linux и ALT Linux.",det:["ALD/FreeIPA"] },
-  { id:"user",    n:"user-backend",          s:"Пользователи",   dom:"auth_c", sk:"both",    lang:"Python",fw:"bcrypt",        desc:"CRUD пользователей и групп. Квоты трафика. SQLite, пароли bcrypt. Импорт CSV.",det:["CRUD","SQLite"] },
-  { id:"webauthd",n:"web-authd",             s:"Captive Portal", dom:"auth_c", sk:"classic", lang:"Python",fw:"aiohttp",       desc:"iptables REDIRECT перехватывает HTTP неавторизованных → 302 на страницу входа. Только классический контекст.",det:["iptables"] },
-  { id:"vpnauthd",n:"vpn-authd",             s:"VPN-аутент.",    dom:"auth_c", sk:"both",    lang:"Python",fw:"daemon",        desc:"Вызывается strongSwan (xauth/EAP). Проверяет через auth-backend, применяет 2FA. Возвращает IP и маршруты.",det:["xauth/eap"] },
-  { id:"fw",      n:"firewall-backend",      s:"МСЭ",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"nftables",      desc:"Stateful Inspection. FORWARD, INPUT, DNAT, SNAT. Профили безопасности (DPI, IPS) к разрешающим правилам. Зоны (до 64 интерфейсов).",det:["FORWARD/INPUT/DNAT/SNAT"] },
-  { id:"cfw",     n:"cfw-backend",           s:"Custom FW",      dom:"fw_c",   sk:"classic", lang:"Python",fw:"aiohttp",       desc:"Пользовательские правила nftables. Pre-filter (до основного МСЭ). GeoIP-блокировка. Только классический контекст.",det:["Pre-filter"] },
-  { id:"alias",   n:"alias-backend",         s:"Объекты (38+)",  dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",       desc:"38+ типов объектов: IP, подсети, MAC, FQDN (динамический резолвинг), сервисы, расписания, зоны (LAN/WAN/DMZ), алиасы AD/ALD. alias-lib импортируют 30+ бэкендов.",det:["38+ модулей"] },
-  { id:"shaper",  n:"shaper-backend",        s:"QoS",            dom:"fw_c",   sk:"classic", lang:"Python",fw:"pyroute2",      desc:"Linux tc, HTB/HFSC. Привязка к пользователям, группам, IP. Только классический контекст.",det:["tc HTB/HFSC"] },
-  { id:"acl",     n:"acl-backend",           s:"ACL",            dom:"fw_c",   sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Мост Control Plane ↔ Data Plane. etcd watch → разворачивает alias → ACL в eBPF maps или VPP ACL plugin. NFLOG → ClickHouse.",det:["eBPF+VPP ACL"] },
-  { id:"vpp_be",  n:"vpp-backend",           s:"VPP конфиг",     dom:"fw_c",   sk:"vpp",     lang:"Python",fw:"vpp-api",       desc:"Python API bindings для VPP: интерфейсы, ACL, L2-бриджи. Записывает состояние интерфейсов (link up/down, MTU) в etcd RUNTIME. Только VCE VPP.",det:["VPP API"] },
-  { id:"l2",      n:"l2-manager",            s:"L2",             dom:"net_c",  sk:"both",    lang:"Python",fw:"pyroute2",      desc:"Ethernet, VLAN 802.1Q, Bond (LACP, active-backup), Bridge. KNI-интерфейсы для связи VPP с Linux kernel. pyroute2 / Netlink API.",det:["Eth/VLAN/Bond"] },
-  { id:"dns_be",  n:"dns-backend",           s:"DNS конфиг",     dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Конфигурация Unbound: рекурсивный резолвер, форвардер, авторитативный. Кэширование, DoH, DNSSEC. Пользовательские зоны и записи.",det:["DoH/DNSSEC"] },
-  { id:"dhcp_be", n:"dhcp-server-backend",   s:"DHCP конфиг",    dom:"net_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Конфигурация ISC DHCP. Пулы по интерфейсам/VLAN, резервирование по MAC. DHCP relay, Dynamic DNS.",det:["Пулы/relay"] },
-  { id:"netscan", n:"netscan-backend",       s:"Сканер",         dom:"net_c",  sk:"both",    lang:"Python",fw:"scapy",         desc:"ARP-сканирование, OS Fingerprinting (TTL, TCP window), MAC OUI-идентификация производителя.",det:["ARP"] },
-  { id:"igmp",    n:"igmpproxy-backend",     s:"IGMP",           dom:"net_c",  sk:"classic", lang:"Python",fw:"aiohttp",       desc:"IGMP Proxy — мультикаст (IPTV) от провайдера. Join/Leave между WAN и LAN. Только классический контекст.",det:["IPTV"] },
-  { id:"cf",      n:"content-filter-backend",s:"Контент-фильтр", dom:"sec_c",  sk:"both",    lang:"Python",fw:"rocksdb",       desc:"145 категорий URL (RocksDB). Морфологические словари, Safe Search. SSL Bump для HTTPS. Обновление из облака Ideco.",det:["145 кат."] },
-  { id:"suricata_be",n:"suricata-backend",   s:"IPS конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"ET Open/Pro, Snort-совместимые, пользовательские сигнатуры. IPS-профили привязываются к правилам МСЭ. Алерты → ClickHouse. Правила → SQLite.",det:["ET/Snort"] },
-  { id:"av",      n:"av-backend",            s:"AV конфиг",      dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"ClamAV и Kaspersky Anti-Virus SDK. Проверка файлов через eCAP-модуль in-process в Squid.",det:["ClamAV/Kaspersky"] },
-  { id:"waf_be",  n:"waf-backend",           s:"WAF конфиг",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"ModSecurity + OWASP CRS. Режимы: prevention (блокировка), detection (лог). WAF-профили → публикации обратного прокси.",det:["ModSecurity"] },
-  { id:"proxy_be",n:"proxy-backend",         s:"Прокси конфиг",  dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Конфигурация Squid. TPROXY (прозрачный) и прямые подключения. SSL Bump: bump/splice/peek.",det:["TPROXY/SSL Bump"] },
-  { id:"reverse", n:"reverse-backend",       s:"Обр.прокси",     dom:"sec_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Nginx обратный прокси с TLS-терминацией. Let's Encrypt (ACME, HTTP-01). Интеграция с WAF.",det:["Let's Encrypt"] },
-  { id:"vpnsrv",  n:"vpn-servers-backend",   s:"VPN-серверы",    dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"IKEv2/IPSec, L2TP/IPSec, SSTP. Автогенерация профилей. Правила авторизации по группам AD.",det:["5 протоколов"] },
-  { id:"ipsec",   n:"ipsec-backend",         s:"IPSec s2s",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"IPSec site-to-site. IKEv1/v2. SA: Phase 1 (DH), Phase 2 (ESP). DPD, PFS, NAT-T.",det:["IKEv1/v2"] },
-  { id:"gostvpn", n:"gost-vpn-backend",      s:"ГОСТ VPN",       dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"ГОСТ Р 34.12-2015: Кузнечик (128 бит), Магма (64 бит). Для КИИ, госорганов, требований ФСБ.",det:["ГОСТ"] },
-  { id:"agent",   n:"agent-backend",         s:"Ideco Client",   dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Ideco Client — фирменный VPN-клиент. Push-профили. Device VPN. Windows, macOS, Linux, Android, iOS.",det:["Push"] },
-  { id:"wg",      n:"wireguard-backend",     s:"WireGuard",      dom:"vpn_c",  sk:"both",    lang:"Python",fw:"aiohttp",       desc:"WireGuard VPN. Noise Protocol, ChaCha20, Curve25519. Управление пирами, QR-коды для мобильных.",det:["Peers"] },
-  { id:"routing", n:"routing-backend",       s:"Маршрутизация",  dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",       desc:"FRRouting. Порядок: direct → PBR → статика/BGP/OSPF → внешние сети → балансировка. BGP (провайдеры), OSPF (LAN), балансировка каналов.",det:["BGP/OSPF"] },
-  { id:"mail",    n:"mail-backend",          s:"Почта",          dom:"rt_c",   sk:"both",    lang:"Python",fw:"aiohttp",       desc:"Postfix SMTP relay. Email-уведомления администраторам, авторассылка отчётов. DKIM, SPF, TLS.",det:["Postfix"] },
+var C=[
+  {id:"web",n:"web-backend",s:"Веб-интерфейс",dom:"ui",sk:"both",lang:"Python",fw:"aiohttp",desc:"Веб-интерфейс администратора NGFW.\n\nNginx (статика, проксирование) + aiohttp (async API). Полное управление всеми модулями.\n\nРолевая модель: суперадминистратор, администратор МСЭ, администратор ИБ, аудитор.\n\n2FA: TOTP, SMS Aero, Multifactor. Telegram-бот: push-уведомления об IPS-алертах, падении каналов, изменениях конфигурации.",det:["Nginx+aiohttp","2FA","Telegram"]},
+  {id:"cabinet",n:"user-cabinet-backend",s:"Личный кабинет",dom:"ui",sk:"both",lang:"Python",fw:"aiohttp",desc:"Личный кабинет пользователя.\n\nСмена пароля, статистика трафика, скачивание VPN-профилей (.ovpn, .mobileconfig, .conf).\n\nSSL VPN портал: доступ к внутренним веб-ресурсам без VPN-клиента.",det:["VPN-профили","SSL VPN"]},
+  {id:"restapi",n:"rest-api-backend",s:"REST API",dom:"api_d",sk:"both",lang:"Python",fw:"aiohttp",desc:"REST API для внешней автоматизации.\n\nOpenAPI. CRUD правил МСЭ, пользователей, VPN-конфигураций, объектов alias.\n\nСценарии: SIEM, SOAR, DevOps/IaC (Terraform, Ansible).\n\nAPI-ключи. Rate limiting.",det:["OpenAPI","SIEM/SOAR"]},
+  {id:"monitor",n:"monitor-backend",s:"Мониторинг",dom:"api_d",sk:"both",lang:"Python",fw:"aiohttp, pysnmp",desc:"Мониторинг состояния NGFW.\n\nCPU, RAM, диски (IOPS, usage), сетевые интерфейсы (bps, pps, errors). Метрики → ClickHouse.\n\nZabbix-agent, SNMP v2c/v3. Healthcheck сервисов. Проверка репутации IP через облако Ideco.",det:["Метрики→CH","Zabbix/SNMP"]},
+  {id:"reports",n:"reports-backend",s:"Отчёты",dom:"rpt",sk:"both",lang:"Python",fw:"aiohttp, clickhouse-driver",desc:"Конструктор отчётов.\n\nЖурнал МСЭ, веб-трафик, IPS-алерты, DPI-статистика, загруженность каналов.\n\nИсточник — ClickHouse. Экспорт: CSV, PDF. Авторассылка по email.",det:["Конструктор","CSV/PDF"]},
+  {id:"audit",n:"audit-backend",s:"Аудит",dom:"rpt",sk:"both",lang:"Python",fw:"aiohttp",desc:"Журнал действий администраторов.\n\nНередактируемый аудит-лог. Diff «было → стало» в JSON. ClickHouse, TTL 365 дней.\n\nФильтрация по администратору, типу действия, периоду. ФСТЭК/ФСБ.",det:["Diff","ФСТЭК"]},
+  {id:"logs",n:"logs-backend",s:"Журналы",dom:"rpt",sk:"both",lang:"Python",fw:"aiohttp",desc:"Централизованный сбор логов.\n\nsystemd journal → ClickHouse. Syslog RFC 5424, CEF для SIEM (ArcSight, QRadar, Splunk). TCP/UDP.",det:["Syslog→CH","CEF"]},
+  {id:"servers",n:"servers-backend",s:"Внешние серверы",dom:"rpt",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация внешних серверов.\n\nSyslog-коллекторы (TCP/UDP, RFC 5424, CEF). NTP-серверы. DNS upstream / DoH endpoints.\n\nНастройки в etcd PERMANENT, доступны через servers-lib.",det:["Syslog/NTP"]},
+  {id:"auth",n:"auth-backend",s:"Аутентификация",dom:"auth_c",sk:"both",lang:"Python",fw:"aiohttp, gssapi",desc:"Ядро аутентификации и авторизации.\n\nМетоды: captive portal, SSO (Kerberos, NTLM), журналы AD, Ideco Client, IP/MAC, подсеть. 2FA.\n\nСессия привязана к IP. До 6 сессий на пользователя. Тайм-аут неактивных.",det:["SSO/NTLM/RADIUS","2FA"]},
+  {id:"ad",n:"ad-backend",s:"Active Directory",dom:"auth_c",sk:"both",lang:"Python",fw:"aiohttp, ldap3",desc:"Интеграция с Active Directory.\n\nLDAP/LDAPS, несколько доменов, инкрементальная синхронизация по USN Changed.\n\nKerberos SSO (keytab/SPN), NTLM (Samba winbind). SQLite-кэш при недоступности DC.",det:["LDAP","Kerberos"]},
+  {id:"ald",n:"ald-backend",s:"ALD Pro",dom:"auth_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Интеграция с ALD Pro и FreeIPA.\n\nLDAP, Kerberos SSO. Для Astra Linux и ALT Linux — импортозамещение в госсекторе и КИИ.",det:["ALD/FreeIPA"]},
+  {id:"user",n:"user-backend",s:"Пользователи",dom:"auth_c",sk:"both",lang:"Python",fw:"aiohttp, bcrypt",desc:"Локальные учётные записи.\n\nCRUD пользователей и групп. Квоты трафика. SQLite, пароли bcrypt. Импорт из CSV.",det:["CRUD","SQLite"]},
+  {id:"webauthd",n:"web-authd",s:"Captive Portal",dom:"auth_c",sk:"classic",lang:"Python",fw:"aiohttp",desc:"Daemon captive portal.\n\niptables REDIRECT перехватывает HTTP неавторизованных → 302 на страницу входа. Только классический контекст.",det:["iptables"]},
+  {id:"vpnauthd",n:"vpn-authd",s:"VPN-аутент.",dom:"auth_c",sk:"both",lang:"Python",fw:"daemon",desc:"Аутентификация VPN-клиентов.\n\nВызывается strongSwan (xauth/eap plugin). Проверяет через auth-backend, применяет 2FA. Возвращает IP и маршруты для клиента.",det:["xauth/eap"]},
+  {id:"fw",n:"firewall-backend",s:"МСЭ",dom:"fw_c",sk:"both",lang:"Python",fw:"aiohttp, nftables",desc:"Межсетевой экран.\n\nStateful Inspection. Таблицы: FORWARD, INPUT, DNAT, SNAT.\n\nПрофили безопасности (DPI, IPS) привязываются к разрешающим правилам. Зоны (до 64 интерфейсов).",det:["FORWARD/INPUT/DNAT/SNAT"]},
+  {id:"cfw",n:"cfw-backend",s:"Custom FW",dom:"fw_c",sk:"classic",lang:"Python",fw:"aiohttp",desc:"Пользовательские правила nftables.\n\nPre-filter: выполняются ДО основного МСЭ. GeoIP-блокировка, специфический NAT. Только классический контекст.",det:["Pre-filter"]},
+  {id:"alias",n:"alias-backend",s:"Объекты (38+)",dom:"fw_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Объектная модель NGFW.\n\n38+ типов: IP, подсети, диапазоны, MAC, FQDN (динамический резолвинг), сервисы, расписания, зоны (LAN/WAN/DMZ), алиасы AD/ALD.\n\nПереиспользуются во всех правилах. alias-lib импортируют 30+ бэкендов.",det:["38+ модулей"]},
+  {id:"shaper",n:"shaper-backend",s:"QoS",dom:"fw_c",sk:"classic",lang:"Python",fw:"aiohttp, pyroute2",desc:"Ограничение скорости входящего трафика.\n\nLinux tc, HTB/HFSC. Привязка к пользователям, группам, IP. Только классический контекст.",det:["tc HTB/HFSC"]},
+  {id:"acl",n:"acl-backend",s:"ACL",dom:"fw_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Трансляция правил МСЭ в ACL для Data Plane.\n\nМост Control Plane ↔ Data Plane. etcd watch → разворачивает alias-объекты → загружает ACL в eBPF maps или VPP ACL plugin.\n\nФиксирует accept/drop через NFLOG → ClickHouse.",det:["eBPF+VPP ACL"]},
+  {id:"vpp_be",n:"vpp-backend",s:"VPP конфиг",dom:"fw_c",sk:"vpp",lang:"Python",fw:"aiohttp, vpp-api",desc:"Конфигурация VPP.\n\nPython API bindings: интерфейсы, ACL, L2-бриджи. Записывает состояние интерфейсов (link up/down, скорость, MTU) в etcd RUNTIME. Только VCE VPP.",det:["VPP API"]},
+  {id:"l2",n:"l2-manager",s:"L2",dom:"net_c",sk:"both",lang:"Python",fw:"aiohttp, pyroute2",desc:"Управление сетевыми интерфейсами.\n\nEthernet, VLAN (802.1Q), Bond (LACP, active-backup), Bridge. KNI-интерфейсы для связи VPP с Linux kernel. pyroute2 / Netlink API.",det:["Eth/VLAN/Bond"]},
+  {id:"dns_be",n:"dns-backend",s:"DNS конфиг",dom:"net_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация Unbound.\n\nРекурсивный резолвер, форвардер, авторитативный. Кэширование, DoH, DNSSEC. Пользовательские зоны и записи.",det:["DoH/DNSSEC"]},
+  {id:"dhcp_be",n:"dhcp-server-backend",s:"DHCP конфиг",dom:"net_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация ISC DHCP.\n\nПулы по интерфейсам/VLAN, резервирование по MAC. DHCP relay, Dynamic DNS.",det:["Пулы/relay"]},
+  {id:"netscan",n:"netscan-backend",s:"Сканер",dom:"net_c",sk:"both",lang:"Python",fw:"aiohttp, scapy",desc:"Обнаружение устройств.\n\nARP-сканирование, OS Fingerprinting (TTL, TCP window), MAC OUI.",det:["ARP"]},
+  {id:"igmp",n:"igmpproxy-backend",s:"IGMP",dom:"net_c",sk:"classic",lang:"Python",fw:"aiohttp",desc:"IGMP Proxy — мультикаст-проксирование.\n\nПринимает мультикаст (IPTV) от провайдера. Join/Leave между WAN и LAN. Только классический контекст.",det:["IPTV"]},
+  {id:"cf",n:"content-filter-backend",s:"Контент-фильтр",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp, rocksdb",desc:"Контент-фильтр.\n\n145 категорий URL (RocksDB). Морфологические словари, Safe Search. SSL Bump для полной фильтрации HTTPS.\n\nБаза обновляется из облака Ideco по подписке.",det:["145 кат."]},
+  {id:"suricata_be",n:"suricata-backend",s:"IPS конфиг",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация IPS (Suricata).\n\nГруппы сигнатур: ET Open, ET Pro, Snort-совместимые, пользовательские. IPS-профили привязываются к правилам МСЭ.\n\nАлерты → ClickHouse. Пользовательские правила → SQLite.",det:["ET/Snort"]},
+  {id:"av",n:"av-backend",s:"AV конфиг",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация антивируса.\n\nДва движка: Kaspersky Anti-Virus SDK и ClamAV. Проверка файлов через eCAP-модуль в Squid.",det:["ClamAV/Kaspersky"]},
+  {id:"waf_be",n:"waf-backend",s:"WAF конфиг",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация WAF.\n\nModSecurity + OWASP CRS. Режимы: prevention (блокировка), detection (логирование). WAF-профили → публикации обратного прокси.",det:["ModSecurity"]},
+  {id:"proxy_be",n:"proxy-backend",s:"Прокси конфиг",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация Squid.\n\nТипы: TPROXY (прозрачный) и прямые подключения.\n\nSSL Bump: bump (полная расшифровка), splice (пропуск), peek (SNI без расшифровки).",det:["TPROXY/SSL Bump"]},
+  {id:"reverse",n:"reverse-backend",s:"Обр.прокси",dom:"sec_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Обратный прокси.\n\nNginx с TLS-терминацией. Публикация внутренних веб-ресурсов в интернет.\n\nLet's Encrypt (ACME, HTTP-01). Интеграция с WAF.",det:["Let's Encrypt"]},
+  {id:"vpnsrv",n:"vpn-servers-backend",s:"VPN-серверы",dom:"vpn_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"VPN-серверы для удалённого доступа.\n\nIKEv2/IPSec, L2TP/IPSec, SSTP. Автогенерация профилей. Правила авторизации по группам AD.",det:["5 протоколов"]},
+  {id:"ipsec",n:"ipsec-backend",s:"IPSec s2s",dom:"vpn_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"IPSec site-to-site.\n\nIKEv1/v2. SA: Phase 1 (DH), Phase 2 (ESP). DPD, PFS, NAT-T.",det:["IKEv1/v2"]},
+  {id:"gostvpn",n:"gost-vpn-backend",s:"ГОСТ VPN",dom:"vpn_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"ГОСТ VPN между двумя NGFW.\n\nГОСТ Р 34.12-2015: Кузнечик (128 бит), Магма (64 бит). Для КИИ, госорганов, требований ФСБ.",det:["ГОСТ"]},
+  {id:"agent",n:"agent-backend",s:"Ideco Client",dom:"vpn_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Управление Ideco Client.\n\nФирменный VPN-клиент. Push-профили. Device VPN. Windows, macOS, Linux, Android, iOS.",det:["Push"]},
+  {id:"wg",n:"wireguard-backend",s:"WireGuard",dom:"vpn_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Конфигурация WireGuard.\n\nNoise Protocol, ChaCha20, Curve25519. Управление пирами, QR-коды для мобильных.",det:["Peers"]},
+  {id:"routing",n:"routing-backend",s:"Маршрутизация",dom:"rt_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Маршрутизация через FRRouting.\n\nПорядок: direct → PBR → статика/BGP/OSPF → внешние сети → балансировка.\n\nPBR (по источнику, интерфейсу), BGP (провайдеры), OSPF (LAN), балансировка каналов.",det:["BGP/OSPF"]},
+  {id:"mail",n:"mail-backend",s:"Почта",dom:"rt_c",sk:"both",lang:"Python",fw:"aiohttp",desc:"Почтовый релей.\n\nPostfix SMTP relay. Email-уведомления администраторам, авторассылка отчётов. DKIM, SPF, TLS.",det:["Postfix"]},
   // DATA PLANE
-  { id:"vpp_dp",      n:"VPP",              s:"Userspace DP",  dom:"dp_core",sk:"vpp",    lang:"C",  fw:"fd.io/DPDK",    desc:"VPP — userspace сетевой стек (DPDK/AF_XDP). Обработка пакетов пачками через граф узлов. KNI-интерфейсы для Suricata, Squid, FRRouting. Конфигурация от vpp-backend через etcd.",det:["DPDK","Vectors"] },
-  { id:"unbound_dp",  n:"Unbound",          s:"DNS daemon",    dom:"dp_core",sk:"both",   lang:"C",  fw:"Unbound",       desc:"Unbound DNS daemon. Рекурсивный резолвер, форвардер, авторитативный. Кэш, prefetch, DoH, DNSSEC. Конфигурация от dns-backend через etcd.",det:["Кэш","DoH"] },
-  { id:"dhcpd_dp",    n:"ISC DHCP",         s:"DHCP daemon",   dom:"dp_core",sk:"both",   lang:"C",  fw:"ISC DHCP",      desc:"ISC DHCP daemon. Пулы, резервирование по MAC, DHCP relay. Конфигурация от dhcp-server-backend через etcd.",det:["Пулы"] },
-  { id:"suricata_dp", n:"Suricata",         s:"IPS daemon",    dom:"dp_ips", sk:"both",   lang:"C",  fw:"Suricata",      desc:"Suricata IPS inline. NFQUEUE, ET Open/Pro + пользовательские сигнатуры. Drop (NF_DROP) / Alert → ClickHouse. Конфигурация от suricata-backend через etcd.",det:["NFQUEUE"] },
-  { id:"squid_dp",    n:"Squid",            s:"HTTP/S прокси", dom:"dp_ips", sk:"both",   lang:"C++",fw:"Squid/libecap",  desc:"Squid HTTP/HTTPS прокси daemon. Платформа для контент-фильтра, AV, отчётности. TPROXY, SSL Bump. eCAP-модули in-process. Конфигурация от proxy-backend через etcd.",det:["eCAP"] },
-  { id:"ecap_av",     n:"ecap-av",          s:"eCAP: AV",      dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap",        desc:"eCAP-модуль антивирусной проверки in-process в Squid. При скачивании файла → ClamAV (clamd) или Kaspersky через Unix socket. Угроза → блокировка.",det:["clamd"] },
-  { id:"ecap_urls",   n:"ecap-urls",        s:"eCAP: URL",     dom:"dp_ips", sk:"both",   lang:"C++",fw:"libecap/rocksdb",desc:"eCAP URL-фильтрация in-process в Squid. RocksDB lookup (145 категорий, microseconds). C++ для inline-производительности.",det:["RocksDB"] },
-  { id:"modsec_dp",   n:"ModSecurity",      s:"WAF",           dom:"dp_ips", sk:"both",   lang:"C",  fw:"ModSecurity",   desc:"ModSecurity WAF в связке с Nginx (обратный прокси). OWASP Top 10: SQLi, XSS, CSRF. OWASP CRS, anomaly scoring.",det:["CRS"] },
-  { id:"appctrl",     n:"app-control-nfq",  s:"DPI",           dom:"dp_dpi", sk:"both",   lang:"C++",fw:"nDPI",           desc:"DPI — контроль приложений через nDPI. 300+ приложений: Telegram, WhatsApp, YouTube, BitTorrent и др. NFQUEUE. Профили к правилам МСЭ → flow-stat-server.",det:["300+"] },
-  { id:"flowsrv",     n:"flow-stat-server", s:"DPI-приём",     dom:"dp_dpi", sk:"both",   lang:"C",  fw:"custom",         desc:"Приёмник DPI-статистики от app-control-nfq (src/dst, приложение, объём). Агрегация в ring buffer → flow-stat-exporter.",det:["Ring buffer"] },
-  { id:"flowexp",     n:"flow-stat-exporter",s:"DPI→CH",       dom:"dp_dpi", sk:"both",   lang:"C++",fw:"clickhouse-cpp", desc:"Экспорт DPI-статистики в ClickHouse. clickhouse-cpp, batch insert. Flush по размеру (1000 записей) или таймауту (5 сек).",det:["Batch"] },
-  { id:"trafmond",    n:"trafmond",          s:"Трафик",        dom:"dp_dpi", sk:"both",   lang:"Python",fw:"pyroute2",   desc:"Мониторинг соединений в реальном времени. Читает conntrack (все активные NAT/stateful-соединения). DNS-кэш для обогащения: имена сайтов вместо IP.",det:["conntrack"] },
-  { id:"bpf",         n:"bpf-acl-rules",    s:"eBPF",          dom:"dp_acl", sk:"classic",lang:"C",  fw:"XDP/libbpf",    desc:"eBPF/XDP — фильтрация до сетевого стека Linux. Пакеты обрабатываются в драйвере NIC (миллионы pps). ACL из acl-backend → eBPF maps (hash, LPM trie). LLVM + libbpf.",det:["XDP"] },
-  { id:"nflog",       n:"ideco-nflog",      s:"NFLOG→CH",      dom:"dp_acl", sk:"both",   lang:"C",  fw:"libnetfilter_log",desc:"Захват событий МСЭ. NFLOG target → libnetfilter_log → ClickHouse (raw_traffic_journal). Данные: timestamp, src/dst IP/port, протокол, ID правила, действие.",det:["accept/drop"] },
-  { id:"strongswan_dp",n:"strongSwan",      s:"IPSec",         dom:"dp_acl", sk:"both",   lang:"C",  fw:"strongSwan",    desc:"strongSwan charon. Удалённый доступ (IKEv2, L2TP) и site-to-site туннели. Аутентификация через vpn-authd. Конфигурация от vpnsrv/ipsec-backend через etcd.",det:["charon"] },
-  { id:"frr_dp",      n:"FRRouting",        s:"zebra/bgpd",    dom:"dp_acl", sk:"both",   lang:"C",  fw:"FRRouting",     desc:"FRRouting daemon'ы: zebra (таблица маршрутизации Linux), bgpd (BGP с провайдерами), ospfd (OSPF в LAN). Конфигурация от routing-backend через etcd.",det:["zebra"] },
-  { id:"keepalived_dp",n:"keepalived",      s:"VRRP",          dom:"dp_acl", sk:"both",   lang:"C",  fw:"keepalived",    desc:"keepalived VRRP daemon для HA. Active-Passive: Master отправляет heartbeat (multicast). Пропуск → Standby забирает виртуальные IP. Конфигурация от cluster-backend через etcd.",det:["VRRP"] },
+  {id:"vpp_dp",n:"VPP",s:"Userspace DP",dom:"dp_core",sk:"vpp",lang:"C",fw:"fd.io, DPDK",desc:"VPP (Vector Packet Processing).\n\nUserspace сетевой стек в VCE VPP. Обходит ядро Linux, пакеты напрямую через DPDK или AF_XDP.\n\nОбработка пачками (vectors) через граф узлов: приём → L2/L3 → ACL → NAT → отправка.\n\nKNI-интерфейсы → Suricata, Squid, FRRouting. Конфигурация от vpp-backend через etcd.",det:["DPDK","Vectors"]},
+  {id:"unbound_dp",n:"Unbound",s:"DNS daemon",dom:"dp_core",sk:"both",lang:"C",fw:"Unbound",desc:"Unbound — DNS-сервер daemon.\n\nРекурсивный резолвер, форвардер, авторитативный. Кэширование, prefetch, DoH, DNSSEC.\n\nКонфигурация от dns-backend через etcd.",det:["Кэш","DoH"]},
+  {id:"dhcpd_dp",n:"ISC DHCP",s:"DHCP daemon",dom:"dp_core",sk:"both",lang:"C",fw:"ISC DHCP",desc:"ISC DHCP — DHCP-сервер daemon.\n\nВыдача IP-адресов, пулы, резервирование по MAC, DHCP relay.\n\nКонфигурация от dhcp-server-backend через etcd.",det:["Пулы"]},
+  {id:"suricata_dp",n:"Suricata",s:"IPS daemon",dom:"dp_ips",sk:"both",lang:"C",fw:"Suricata",desc:"Suricata — IPS inline daemon.\n\nNFQUEUE. ET Open/Pro + пользовательские сигнатуры.\n\nDrop (NF_DROP) или Alert (NF_ACCEPT + событие). Алерты → ClickHouse.\n\nКонфигурация от suricata-backend через etcd.",det:["NFQUEUE"]},
+  {id:"squid_dp",n:"Squid",s:"HTTP/S прокси",dom:"dp_ips",sk:"both",lang:"C++",fw:"Squid, libecap",desc:"Squid — HTTP/HTTPS прокси daemon.\n\nПлатформа для контент-фильтра, AV и отчётности.\n\nTPROXY (прозрачный). SSL Bump для HTTPS. eCAP-модули in-process.\n\nКонфигурация от proxy-backend через etcd.",det:["eCAP"]},
+  {id:"ecap_av",n:"ecap-av",s:"eCAP: AV",dom:"dp_ips",sk:"both",lang:"C++",fw:"libecap",desc:"eCAP-модуль антивирусной проверки.\n\nIn-process плагин для Squid (libecap). При скачивании файла → проверка через ClamAV (clamd) или Kaspersky по Unix socket.\n\nОбнаружена угроза → блокировка + страница уведомления.",det:["clamd"]},
+  {id:"ecap_urls",n:"ecap-urls",s:"eCAP: URL",dom:"dp_ips",sk:"both",lang:"C++",fw:"libecap, rocksdb",desc:"eCAP-модуль URL-фильтрации.\n\nIn-process плагин для Squid. Каждый HTTP/S запрос → lookup в RocksDB (145 категорий, microseconds). Запрещена → блокировка.\n\nC++ для inline-производительности.",det:["RocksDB"]},
+  {id:"modsec_dp",n:"ModSecurity",s:"WAF",dom:"dp_ips",sk:"both",lang:"C",fw:"ModSecurity",desc:"ModSecurity — WAF daemon.\n\nСвязка с Nginx (обратный прокси). OWASP Top 10: SQL injection, XSS, CSRF, Path Traversal.\n\nOWASP CRS, anomaly scoring.",det:["CRS"]},
+  {id:"appctrl",n:"app-control-nfq",s:"DPI",dom:"dp_dpi",sk:"both",lang:"C++",fw:"nDPI",desc:"DPI — контроль приложений.\n\nnDPI, 300+ приложений: Telegram, WhatsApp, YouTube, TikTok, BitTorrent и др.\n\nNFQUEUE. Профили привязываются к разрешающим правилам МСЭ. → flow-stat-server.",det:["300+"]},
+  {id:"flowsrv",n:"flow-stat-server",s:"DPI-приём",dom:"dp_dpi",sk:"both",lang:"C",fw:"custom",desc:"Приёмник DPI-статистики.\n\nПринимает flow-данные от app-control-nfq: src/dst IP, порты, приложение, объём. Агрегирует в ring buffer → flow-stat-exporter.",det:["Ring buffer"]},
+  {id:"flowexp",n:"flow-stat-exporter",s:"DPI→CH",dom:"dp_dpi",sk:"both",lang:"C++",fw:"clickhouse-cpp",desc:"Экспорт DPI-статистики в ClickHouse.\n\nclickhouse-cpp, batch insert. Flush по размеру (1000 записей) или таймауту (5 сек). Таблица flow_stats.",det:["Batch"]},
+  {id:"trafmond",n:"trafmond",s:"Трафик",dom:"dp_dpi",sk:"both",lang:"Python",fw:"pyroute2",desc:"Мониторинг соединений в реальном времени.\n\nЧитает conntrack (все активные NAT/stateful-соединения). Обогащение DNS-кэшем: показывает имена сайтов вместо IP.",det:["conntrack"]},
+  {id:"bpf",n:"bpf-acl-rules",s:"eBPF",dom:"dp_acl",sk:"classic",lang:"C",fw:"XDP, libbpf",desc:"eBPF/XDP — фильтрация до сетевого стека.\n\neBPF-программа загружается в драйвер NIC, обрабатывает пакеты ДО Linux networking stack (миллионы pps).\n\nACL из acl-backend → eBPF maps (hash, LPM trie). LLVM + libbpf. Только классический контекст.",det:["XDP"]},
+  {id:"nflog",n:"ideco-nflog",s:"NFLOG→CH",dom:"dp_acl",sk:"both",lang:"C",fw:"libnetfilter_log",desc:"Захват событий МСЭ.\n\nNFLOG target → libnetfilter_log → ClickHouse (raw_traffic_journal).\n\nДанные: timestamp, src/dst IP/port, протокол, ID правила, действие (accept/drop).",det:["accept/drop"]},
+  {id:"strongswan_dp",n:"strongSwan",s:"IPSec",dom:"dp_acl",sk:"both",lang:"C",fw:"strongSwan",desc:"strongSwan — IPSec/IKEv2 daemon (charon).\n\nУдалённый доступ (IKEv2, L2TP) и site-to-site туннели.\n\nАутентификация через vpn-authd (xauth/EAP). Конфигурация от vpnsrv/ipsec-backend через etcd.",det:["charon"]},
+  {id:"frr_dp",n:"FRRouting",s:"zebra/bgpd",dom:"dp_acl",sk:"both",lang:"C",fw:"FRRouting",desc:"FRRouting — daemon'ы маршрутизации.\n\nzebra: таблица маршрутизации Linux. bgpd: BGP с провайдерами. ospfd: OSPF внутри сети.\n\nКонфигурация от routing-backend через etcd.",det:["zebra"]},
+  {id:"keepalived_dp",n:"keepalived",s:"VRRP",dom:"dp_acl",sk:"both",lang:"C",fw:"keepalived",desc:"keepalived — VRRP daemon для HA.\n\nActive-Passive: Master отправляет heartbeat (multicast). Пропуск → Standby забирает виртуальные IP.\n\nПереключение за несколько секунд. Конфигурация от cluster-backend через etcd.",det:["VRRP"]},
   // INFRA
-  { id:"system",  n:"system-backend",  s:"Ядро",       dom:"sys_i",sk:"both",lang:"Python",fw:"psutil",  desc:"Часовой пояс, язык. Администраторы (локальные, AD/ALD Pro/RADIUS). Роли: суперадминистратор, МСЭ, ИБ, аудитор. Терминал для диагностики. system-lib → 20+ бэкендов.",det:["system-lib: 20+"] },
-  { id:"license", n:"license-backend", s:"Лицензии",   dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp", desc:"Привязка к серверу (онлайн/офлайн). Определяет: макс. кол-во пользователей, доступность модулей (IPS ET Pro, Kaspersky, контент-фильтр).",det:["Подписки"] },
-  { id:"backup",  n:"backup-backend",  s:"Бэкапы",     dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp", desc:"etcd dump + конфиги → tar.gz. По расписанию или вручную. Бэкап системного контекста не включает дочерние VCE.",det:["etcd dump"] },
-  { id:"sysupd",  n:"sysupdate-backend",s:"Обновления",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp", desc:"ОС (RPM), ядро Linux, базы IPS (ET Open/Pro), AV (ClamAV/Kaspersky), URL-категории, GeoIP. Автоматическое по расписанию. Перед обновлением — автобэкап.",det:["RPM"] },
-  { id:"cert",    n:"cert-backend",    s:"PKI",         dom:"sys_i",sk:"both",lang:"Python",fw:"pyOpenSSL",desc:"Автогенерация корневого CA при первом запуске. Цепочки для каждого модуля. Let's Encrypt (ACME, HTTP-01). CRL/OCSP.",det:["CA"] },
-  { id:"vce",     n:"vce-backend",     s:"VCE",         dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp", desc:"Виртуальные контексты через systemd-nspawn. Классический (8 ГБ + 2 ядра) и VPP (8 ГБ + 4 ядра). Изоляция по CPU/памяти. vce-lib → 35+ бэкендов.",det:["vce-lib: 35+"] },
-  { id:"cc",      n:"central-console", s:"Ideco Center",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp", desc:"Централизованное управление парком NGFW. Шаблоны политик. Мониторинг всех устройств. Для организаций с несколькими NGFW.",det:["Парк"] },
-  { id:"cluster", n:"cluster-backend", s:"Кластер",     dom:"ha_i", sk:"both",lang:"Python",fw:"aiohttp", desc:"Active-Passive кластер. VRRP (keepalived): пропуск heartbeat → Standby забирает виртуальные IP. Синхронизация через etcd. Только системный контекст (не внутри VCE).",det:["VRRP"] }
+  {id:"system",n:"system-backend",s:"Ядро",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp, psutil",desc:"Ядро системы.\n\nЧасовой пояс, язык. Администраторы (локальные, AD/ALD Pro/RADIUS). Роли: суперадминистратор, МСЭ, ИБ, аудитор.\n\nТерминал для диагностики. Мониторинг: CPU, RAM, диски. system-lib импортируют 20+ бэкендов.",det:["system-lib: 20+"]},
+  {id:"license",n:"license-backend",s:"Лицензии",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"Лицензирование NGFW.\n\nПривязка к серверу (онлайн/офлайн). Определяет: макс. кол-во пользователей, доступность модулей (IPS ET Pro, Kaspersky, контент-фильтр).",det:["Подписки"]},
+  {id:"backup",n:"backup-backend",s:"Бэкапы",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"Резервное копирование конфигурации.\n\netcd dump + конфиги → tar.gz. По расписанию или вручную. Бэкап системного контекста не включает дочерние VCE.",det:["etcd dump"]},
+  {id:"sysupd",n:"sysupdate-backend",s:"Обновления",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"Обновления NGFW.\n\nОС (RPM), ядро Linux, IPS (ET Open/Pro), AV (ClamAV/Kaspersky), URL-категории, GeoIP.\n\nАвтоматическое по расписанию. Перед обновлением — автобэкап.",det:["RPM"]},
+  {id:"cert",n:"cert-backend",s:"PKI",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp, pyOpenSSL",desc:"PKI — центр сертификации NGFW.\n\nАвтогенерация корневого CA при первом запуске. Цепочки для каждого модуля.\n\nLet's Encrypt (ACME, HTTP-01), перевыпуск раз в 3 мес. CRL/OCSP.",det:["CA"]},
+  {id:"vce",n:"vce-backend",s:"VCE",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"VCE — виртуальные контексты NGFW.\n\nsystemd-nspawn контейнеры. Классический (8 ГБ RAM + 2 ядра) и VPP (8 ГБ RAM + 4 ядра).\n\nИзоляция по CPU/памяти. Интерфейсы и зоны из системного контекста. vce-lib импортируют 35+ бэкендов.",det:["vce-lib: 35+"]},
+  {id:"cc",n:"central-console",s:"Ideco Center",dom:"sys_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"Ideco Center — централизованное управление парком NGFW.\n\nШаблоны политик. Мониторинг всех устройств. Для организаций и провайдеров с несколькими NGFW.",det:["Парк"]},
+  {id:"cluster",n:"cluster-backend",s:"Кластер",dom:"ha_i",sk:"both",lang:"Python",fw:"aiohttp",desc:"Кластеризация — Active-Passive.\n\nMaster обрабатывает трафик, Standby — горячий резерв. VRRP (keepalived): пропуск heartbeat → Standby забирает виртуальные IP.\n\nСинхронизация конфигурации через etcd. Только уровень системного контекста (не внутри VCE).",det:["VRRP"]}
 ];
 
-const DBS = [
-  { id:"db_perm",   n:"etcd PERM",  sub:"Конфиг",   color:CE  },
-  { id:"db_run",    n:"etcd RUN",   sub:"Оперативные",color:CE2},
-  { id:"db_ch",     n:"ClickHouse", sub:"Логи",      color:CC  },
-  { id:"db_sq_ad",  n:"SQLite:AD",  sub:"Кэш",       color:CS  },
-  { id:"db_sq_usr", n:"SQLite:Usr", sub:"Учётки",    color:CS2 },
-  { id:"db_sq_ips", n:"SQLite:IPS", sub:"Rules",     color:CS3 },
-  { id:"db_rk",     n:"RocksDB",    sub:"URL",       color:CR  }
+var DBS=[
+  {id:"db_perm",n:"etcd PERM",sub:"Конфиг",color:CE},
+  {id:"db_run",n:"etcd RUN",sub:"Оперативные",color:CE2},
+  {id:"db_ch",n:"ClickHouse",sub:"Логи",color:CC},
+  {id:"db_sq_ad",n:"SQLite:AD",sub:"Кэш",color:CS},
+  {id:"db_sq_usr",n:"SQLite:Usr",sub:"Учётки",color:CS2},
+  {id:"db_sq_ips",n:"SQLite:IPS",sub:"Rules",color:CS3},
+  {id:"db_rk",n:"RocksDB",sub:"URL",color:CR}
 ];
-const DB_COMP_MAP = { db_perm:DB_PERM, db_run:DB_RUN, db_ch:DB_CH, db_sq_ad:DB_SQ_AD, db_sq_usr:DB_SQ_USR, db_sq_ips:DB_SQ_IPS, db_rk:DB_RK };
+var DB_COMP_MAP={"db_perm":DB_PERM,"db_run":DB_RUN,"db_ch":DB_CH,"db_sq_ad":DB_SQ_AD,"db_sq_usr":DB_SQ_USR,"db_sq_ips":DB_SQ_IPS,"db_rk":DB_RK};
 
-const DEF_TEAMS = [
-  { id:"t_net", name:"Network & Routing", members:["l2","dns_be","dhcp_be","routing","igmp","netscan","unbound_dp","dhcpd_dp","frr_dp","keepalived_dp"] },
-  { id:"t_fw",  name:"Firewall & Traffic",members:["fw","alias","acl","cfw","shaper","vpp_be","vpp_dp","bpf","nflog"] },
-  { id:"t_sec", name:"Security & CF",     members:["cf","suricata_be","av","waf_be","proxy_be","reverse","suricata_dp","squid_dp","ecap_av","ecap_urls","modsec_dp","appctrl"] },
-  { id:"t_auth",name:"Auth & Users",      members:["auth","ad","ald","user","webauthd","vpnauthd"] },
-  { id:"t_vpn", name:"VPN & Remote",      members:["vpnsrv","ipsec","gostvpn","agent","wg","strongswan_dp"] },
-  { id:"t_mon", name:"Monitoring & Reports",members:["monitor","reports","audit","logs","servers","mail"] },
-  { id:"t_plat",name:"Platform & Infra",  members:["system","license","backup","sysupd","cert","vce","cc","cluster"] },
-  { id:"t_ui",  name:"UI & API",          members:["web","cabinet","restapi"] },
-  { id:"t_perf",name:"Perf & DPI",        members:["flowsrv","flowexp","trafmond"] }
+var DEFAULT_TEAMS=[
+  {id:"t_net",name:"Network & Routing",members:["l2","dns_be","dhcp_be","routing","igmp","netscan","unbound_dp","dhcpd_dp","frr_dp","keepalived_dp"]},
+  {id:"t_fw",name:"Firewall & Traffic",members:["fw","alias","acl","cfw","shaper","vpp_be","vpp_dp","bpf","nflog"]},
+  {id:"t_sec",name:"Security & CF",members:["cf","suricata_be","av","waf_be","proxy_be","reverse","suricata_dp","squid_dp","ecap_av","ecap_urls","modsec_dp","appctrl"]},
+  {id:"t_auth",name:"Auth & Users",members:["auth","ad","ald","user","webauthd","vpnauthd"]},
+  {id:"t_vpn",name:"VPN & Remote",members:["vpnsrv","ipsec","gostvpn","agent","wg","strongswan_dp"]},
+  {id:"t_mon",name:"Monitoring & Reports",members:["monitor","reports","audit","logs","servers","mail"]},
+  {id:"t_plat",name:"Platform & Infra",members:["system","license","backup","sysupd","cert","vce","cc","cluster"]},
+  {id:"t_ui",name:"UI & API",members:["web","cabinet","restapi"]},
+  {id:"t_perf",name:"Perf & DPI",members:["flowsrv","flowexp","trafmond"]}
 ];
 
-const LIBS = {"system":["alerts","cluster","inet-access","license","vce","cert"],"alias":["ad-users","alias","cluster","firewall","gost-vpn","inet-access","license","sessions","vce"],"fw":["alerts","alias","cluster","firewall","gost-vpn","ipsec","l2manager","routing","system","vce","vpn-servers","suricata"],"auth":["ad-users","agent","alerts","alias","auth","ipsec","license","sessions","system","vpn-servers","vpn-authd","vce"],"web":["ad-users","alerts","alias","cert","system","vce","vpn-authd"],"reports":["ad-users","alias","auth","cert","content-filter","license","reports","vce","av","cluster","firewall","l2manager","sessions","suricata","system"],"monitor":["alerts","alias","l2manager","reports","sessions","suricata","system","vce","waf","cluster","inet-access","license"],"routing":["agent","alerts","alias","cluster","gost-vpn","inet-access","ipsec","l2manager","routing","sessions","vce","vpn-servers"],"dns_be":["ad-users","alerts","alias","l2manager","license","routing","sessions","vpn-servers"],"dhcp_be":["alias","dhcp-server","l2manager","proxy","sessions","system","vce"],"proxy_be":["ad-users","alerts","av","cert","content-filter","l2manager","proxy","system","vce"],"cf":["alerts","cert","content-filter","inet-access","license","servers","vpp"],"suricata_be":["alerts","alias","inet-access","l2manager","license","routing","sessions","suricata","vce"],"av":["av","inet-access","license","vce","vpp"],"waf_be":["system","vce","waf"],"reverse":["ad-users","agent","cert","l2manager","proxy","vce","alerts"],"cert":["alerts","cert","l2manager","vce"],"vpnsrv":["ad-users","agent","alerts","alias","cert","l2manager","sessions","routing","vce","vpn-authd","vpn-servers"],"ipsec":["ad-users","alerts","alias","cert","firewall","ipsec","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"gostvpn":["alerts","alias","gost-vpn","cert","firewall"],"agent":["ad-users","agent","auth","cert","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"user":["auth","license","sessions","system","ad-users","alias"],"ad":["ad-users","alerts","alias","auth","system","vce"],"ald":["alerts","alias","auth","vce"],"audit":["system"],"logs":["servers"],"servers":["system"],"license":["alerts","license","system","vce"],"backup":["system"],"cluster":["cluster","l2manager","license","system","vce"],"sysupd":["license","system"],"mail":["system"],"vce":["system","vce"],"cc":["system"],"restapi":["alias","auth","system","vce"],"cabinet":["system","vce"],"cfw":["alias","firewall","vce"],"shaper":["alias","firewall","vce"],"netscan":["l2manager"],"igmp":["alias","system","vce"],"acl":["alias","firewall","vce"],"vpp_be":["alias","cluster","vce","vpp"],"l2":["alias","firewall","l2manager","system","vpp","cluster","vce"]};
-const LIB2ID = {"alias":"alias","auth":"auth","cert":"cert","cluster":"cluster","license":"license","vce":"vce","system":"system","firewall":"fw","routing":"routing","l2manager":"l2","proxy":"proxy_be","content-filter":"cf","av":"av","reports":"reports","monitor":"monitor","alerts":"monitor","inet-access":"auth","ad-users":"ad","sessions":"auth","vpn-servers":"vpnsrv","agent":"agent","ipsec":"ipsec","gost-vpn":"gostvpn","dhcp-server":"dhcp_be","suricata":"suricata_be","waf":"waf_be","servers":"servers","vpn-authd":"vpnauthd","vpp":"vpp_be"};
+var LIBS={"system":["alerts","cluster","inet-access","license","vce","cert"],"alias":["ad-users","alias","cluster","firewall","gost-vpn","inet-access","license","sessions","vce"],"fw":["alerts","alias","cluster","firewall","gost-vpn","ipsec","l2manager","routing","system","vce","vpn-servers","suricata"],"auth":["ad-users","agent","alerts","alias","auth","ipsec","license","sessions","system","vpn-servers","vpn-authd","vce"],"web":["ad-users","alerts","alias","cert","system","vce","vpn-authd"],"reports":["ad-users","alias","auth","cert","content-filter","license","reports","vce","av","cluster","firewall","l2manager","sessions","suricata","system"],"monitor":["alerts","alias","l2manager","reports","sessions","suricata","system","vce","waf","cluster","inet-access","license"],"routing":["agent","alerts","alias","cluster","gost-vpn","inet-access","ipsec","l2manager","routing","sessions","vce","vpn-servers"],"dns_be":["ad-users","alerts","alias","l2manager","license","routing","sessions","vpn-servers"],"dhcp_be":["alias","dhcp-server","l2manager","proxy","sessions","system","vce"],"proxy_be":["ad-users","alerts","av","cert","content-filter","l2manager","proxy","system","vce"],"cf":["alerts","cert","content-filter","inet-access","license","servers","vpp"],"suricata_be":["alerts","alias","inet-access","l2manager","license","routing","sessions","suricata","vce"],"av":["av","inet-access","license","vce","vpp"],"waf_be":["system","vce","waf"],"reverse":["ad-users","agent","cert","l2manager","proxy","vce","alerts"],"cert":["alerts","cert","l2manager","vce"],"vpnsrv":["ad-users","agent","alerts","alias","cert","l2manager","sessions","routing","vce","vpn-authd","vpn-servers"],"ipsec":["ad-users","alerts","alias","cert","firewall","ipsec","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"gostvpn":["alerts","alias","gost-vpn","cert","firewall"],"agent":["ad-users","agent","auth","cert","l2manager","routing","sessions","vce","vpn-authd","vpn-servers"],"user":["auth","license","sessions","system","ad-users","alias"],"ad":["ad-users","alerts","alias","auth","system","vce"],"ald":["alerts","alias","auth","vce"],"audit":["system"],"logs":["servers"],"servers":["system"],"license":["alerts","license","system","vce"],"backup":["system"],"cluster":["cluster","l2manager","license","system","vce"],"sysupd":["license","system"],"mail":["system"],"vce":["system","vce"],"cc":["system"],"restapi":["alias","auth","system","vce"],"cabinet":["system","vce"],"cfw":["alias","firewall","vce"],"shaper":["alias","firewall","vce"],"netscan":["l2manager"],"igmp":["alias","system","vce"],"acl":["alias","firewall","vce"],"vpp_be":["alias","cluster","vce","vpp"],"l2":["alias","firewall","l2manager","system","vpp","cluster","vce"]};
+var LIB2ID={"alias":"alias","auth":"auth","cert":"cert","cluster":"cluster","license":"license","vce":"vce","system":"system","firewall":"fw","routing":"routing","l2manager":"l2","proxy":"proxy_be","content-filter":"cf","av":"av","reports":"reports","monitor":"monitor","alerts":"monitor","inet-access":"auth","ad-users":"ad","sessions":"auth","vpn-servers":"vpnsrv","agent":"agent","ipsec":"ipsec","gost-vpn":"gostvpn","dhcp-server":"dhcp_be","suricata":"suricata_be","waf":"waf_be","servers":"servers","vpn-authd":"vpnauthd","vpp":"vpp_be"};
 
-const CW=148,CG=5,RH=36,RG=3,DT=16,LT=30,LP=12,IW=190;
-function buildLayout() {
-  const pos={};let y=8,mW=0;
-  LAYERS.forEach(lay=>{
-    const ds=Object.keys(DOMS).filter(k=>DOMS[k].ly===lay.id);
-    let tw=LP; ds.forEach(()=>{tw+=CW+CG+10;}); if(tw>mW)mW=tw;
+var CW=148,CG=5,RH=36,RG=3,DT=16,LT=30,LP=12,IW=190;
+function buildLayout(){
+  var pos={},y=8,mW=0;
+  LAYERS.forEach(function(lay){
+    var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});
+    var tw=LP;
+    ds.forEach(function(){tw+=CW+CG+10;});
+    if(tw>mW)mW=tw;
   });
-  LAYERS.forEach(lay=>{
-    const ds=Object.keys(DOMS).filter(k=>DOMS[k].ly===lay.id);
-    let maxR=0; ds.forEach(dk=>{const cnt=C.filter(c=>c.dom===dk).length;if(cnt>maxR)maxR=cnt;});
-    const lH=LT+maxR*(RH+RG)+DT+12;
-    pos["L_"+lay.id]={x:LP,y,w:mW,h:lH};
-    let dx=LP+6;
-    ds.forEach(dk=>{
-      const comps=C.filter(c=>c.dom===dk),dW=CW+8;
+  LAYERS.forEach(function(lay){
+    var ds=Object.keys(DOMS).filter(function(k){return DOMS[k].ly===lay.id;});
+    var maxR=0;
+    ds.forEach(function(dk){var cnt=C.filter(function(c){return c.dom===dk;}).length;if(cnt>maxR)maxR=cnt;});
+    var lH=LT+maxR*(RH+RG)+DT+12;
+    pos["L_"+lay.id]={x:LP,y:y,w:mW,h:lH};
+    var dx=LP+6;
+    ds.forEach(function(dk){
+      var comps=C.filter(function(c){return c.dom===dk;});
+      var dW=CW+8;
       pos["D_"+dk]={x:dx,y:y+LT,w:dW,h:lH-LT-6};
-      comps.forEach((c,ci)=>{pos[c.id]={x:dx+4,y:y+LT+DT+ci*(RH+RG),w:CW,h:RH};});
+      comps.forEach(function(c,ci){pos[c.id]={x:dx+4,y:y+LT+DT+ci*(RH+RG),w:CW,h:RH};});
       dx+=dW+CG;
     });
     y+=lH+6;
   });
-  const iH=y-8-6,iX=mW+LP+10;
+  var iH=y-8-6,iX=mW+LP+10;
   pos.INFRA={x:iX,y:8,w:IW,h:iH};
-  const infraDs=Object.keys(DOMS).filter(k=>DOMS[k].ly==="infra");
-  let iy=40;
-  infraDs.forEach(dk=>{
-    const comps=C.filter(c=>c.dom===dk),dH=comps.length*(RH+RG)+DT+8;
+  var infraDs=Object.keys(DOMS).filter(function(k){return DOMS[k].ly==="infra";});
+  var iy=40;
+  infraDs.forEach(function(dk){
+    var comps=C.filter(function(c){return c.dom===dk;});
+    var dH=comps.length*(RH+RG)+DT+8;
     pos["D_"+dk]={x:iX+6,y:8+iy,w:IW-12,h:dH};
-    comps.forEach((c,ci)=>{pos[c.id]={x:iX+10,y:8+iy+DT+ci*(RH+RG),w:IW-20,h:RH};});
+    comps.forEach(function(c,ci){pos[c.id]={x:iX+10,y:8+iy+DT+ci*(RH+RG),w:IW-20,h:RH};});
     iy+=dH+6;
   });
   pos["D_db_i"]={x:iX+6,y:8+iy,w:IW-12,h:DBS.length*32+DT+8};
-  DBS.forEach((db,di)=>{pos[db.id]={x:iX+10,y:8+iy+DT+di*32,w:IW-20,h:26};});
+  DBS.forEach(function(db,di){pos[db.id]={x:iX+10,y:8+iy+DT+di*32,w:IW-20,h:26};});
   return pos;
 }
-const POS=buildLayout();
+var POS=buildLayout();
 
-function getConn(id) {
-  const libs=LIBS[id]; if(!libs) return new Set();
-  const s=new Set();
-  libs.forEach(lib=>{const m=LIB2ID[lib];if(m&&m!==id)s.add(m);});
-  Object.keys(LIBS).forEach(oid=>{
+function getConn(id){
+  var libs=LIBS[id];
+  if(!libs)return new Set();
+  var s=new Set();
+  libs.forEach(function(lib){var m=LIB2ID[lib];if(m&&m!==id)s.add(m);});
+  Object.keys(LIBS).forEach(function(oid){
     if(oid===id)return;
-    (LIBS[oid]||[]).forEach(lib=>{const m=LIB2ID[lib];if(m===id)s.add(oid);});
+    (LIBS[oid]||[]).forEach(function(lib){var m=LIB2ID[lib];if(m===id)s.add(oid);});
   });
   return s;
 }
-function getLibsBtw(a,b) {
-  const r=[];
-  (LIBS[a]||[]).forEach(l=>{if(LIB2ID[l]===b)r.push(l);});
-  (LIBS[b]||[]).forEach(l=>{if(LIB2ID[l]===a&&!r.includes(l))r.push(l);});
+function getLibsBtw(a,b){
+  var r=[];
+  (LIBS[a]||[]).forEach(function(l){if(LIB2ID[l]===b)r.push(l);});
+  (LIBS[b]||[]).forEach(function(l){if(LIB2ID[l]===a&&r.indexOf(l)<0)r.push(l);});
   return r;
 }
 function getDbC(did){return DB_COMP_MAP[did]||[];}
-function getDpLinks(id){return DP_LINKS.filter(l=>l.from===id||l.to===id);}
+function getDpLinks(id){return DP_LINKS.filter(function(l){return l.from===id||l.to===id;});}
 
-export default function App() {
-  const svgRef=useRef(null);
-  const [theme,setTheme]=useState("light"); const T=THEMES[theme];
-  const [sel,setSel]=useState(null);
-  const [pan,setPan]=useState({x:0,y:0});
-  const [zoom,setZoom]=useState(0.52);
-  const [panning,setPanning]=useState(false);
-  const ps=useRef(null); const dd=useRef(false);
-  const [search,setSearch]=useState("");
-  const [sL,setSL]=useState(null);
-  const [sD,setSD]=useState(null);
-  const [sDb,setSDb]=useState(null);
-  const [hDb,setHDb]=useState(null);
-  const [tt,setTT]=useState(null);
-  const [scenario,setScenario]=useState(null);
-  const [scStep,setScStep]=useState(0);
-  const [teams,setTeams]=useState(DEF_TEAMS);
-  const [showTeams,setShowTeams]=useState(false);
-  const [dragComp,setDragComp]=useState(null);
-  const [dragOver,setDragOver]=useState(null);
-  const [teamHL,setTeamHL]=useState(null);
-  const [showAllLinks,setShowAllLinks]=useState(false);
-  const [undoStack,setUndoStack]=useState([]);
+function App(){
+  var svgRef=useRef(null);
+  var th=useState("light");var theme=th[0];var setTheme=th[1];var T=THEMES[theme];
+  var ss=useState(null);var sel=ss[0];var setSel=ss[1];
+  var pa=useState({x:0,y:0});var pan=pa[0];var setPan=pa[1];
+  var zo=useState(0.52);var zoom=zo[0];var setZoom=zo[1];
+  var pn=useState(false);var panning=pn[0];var setPanning=pn[1];
+  var ps=useRef(null);var dd=useRef(false);
+  var sr=useState("");var search=sr[0];var setSearch=sr[1];
+  var sl=useState(null);var sL=sl[0];var setSL=sl[1];
+  var sd=useState(null);var sD=sd[0];var setSD=sd[1];
+  var sdb=useState(null);var sDb=sdb[0];var setSDb=sdb[1];
+  var hdb=useState(null);var hDb=hdb[0];var setHDb=hdb[1];
+  var tt2=useState(null);var tt=tt2[0];var setTT=tt2[1];
+  var sc2=useState(null);var scenario=sc2[0];var setScenario=sc2[1];
+  var scs=useState(0);var scStep=scs[0];var setScStep=scs[1];
+  var tm=useState(DEFAULT_TEAMS);var teams=tm[0];var setTeams=tm[1];
+  var st=useState(false);var showTeams=st[0];var setShowTeams=st[1];
+  var dc=useState(null);var dragComp=dc[0];var setDragComp=dc[1];
+  var dov=useState(null);var dragOver=dov[0];var setDragOver=dov[1];
+  var thl=useState(null);var teamHL=thl[0];var setTeamHL=thl[1];
+  var sal=useState(false);var showAllLinks=sal[0];var setShowAllLinks=sal[1];
+  var us=useState([]);var undoStack=us[0];var setUndoStack=us[1];
 
-  const ac=sel, adb=sDb||hDb;
-  const conn=useMemo(()=>ac?getConn(ac):new Set(),[ac]);
-  const selC=useMemo(()=>C.find(c=>c.id===sel)||null,[sel]);
+  var ac=sel;
+  var adb=sDb||hDb;
+  var conn=useMemo(function(){return ac?getConn(ac):new Set();},[ac]);
+  var selC=C.find(function(c){return c.id===sel;})||null;
 
-  const sIds=useMemo(()=>{
+  // FIX #3: search in name, short, desc, det
+  var sIds=useMemo(function(){
     if(!search.trim())return null;
-    const q=search.toLowerCase();
-    return new Set(C.filter(c=>
-      c.n.toLowerCase().includes(q)||c.s.toLowerCase().includes(q)||
-      (c.desc&&c.desc.toLowerCase().includes(q))||(c.det&&c.det.join(" ").toLowerCase().includes(q))
-    ).map(c=>c.id));
+    var q=search.toLowerCase();
+    return new Set(C.filter(function(c){
+      return c.n.toLowerCase().indexOf(q)>=0||
+             c.s.toLowerCase().indexOf(q)>=0||
+             (c.desc&&c.desc.toLowerCase().indexOf(q)>=0)||
+             (c.det&&c.det.join(" ").toLowerCase().indexOf(q)>=0);
+    }).map(function(c){return c.id;}));
   },[search]);
 
-  const dbBk=useMemo(()=>adb?new Set(getDbC(adb)):new Set(),[adb]);
-  const selCompDbs=useMemo(()=>{
+  var dbBk=useMemo(function(){return adb?new Set(getDbC(adb)):new Set();},[adb]);
+  // FIX #2: only highlight DBs connected to selected comp
+  var selCompDbs=useMemo(function(){
     if(!ac)return new Set();
-    const s=new Set(); DBS.forEach(db=>{if(getDbC(db.id).includes(ac))s.add(db.id);}); return s;
+    var s=new Set();
+    DBS.forEach(function(db){if(getDbC(db.id).indexOf(ac)>=0)s.add(db.id);});
+    return s;
   },[ac]);
-  const activeDbColor=useMemo(()=>{if(!adb)return null;const db=DBS.find(d=>d.id===adb);return db?db.color:null;},[adb]);
+  var activeDbColor=useMemo(function(){
+    if(!adb)return null;
+    var db=DBS.find(function(d){return d.id===adb;});
+    return db?db.color:null;
+  },[adb]);
 
-  const scHighlight=useMemo(()=>{
+  var scHighlight=useMemo(function(){
     if(!scenario)return new Set();
-    const sc=SCENARIOS.find(s=>s.id===scenario); if(!sc)return new Set();
-    return new Set(sc.steps.slice(0,scStep+1).map(s=>s.comp));
+    var sc=SCENARIOS.find(function(s){return s.id===scenario;});
+    if(!sc)return new Set();
+    return new Set(sc.steps.slice(0,scStep+1).map(function(s){return s.comp;}));
   },[scenario,scStep]);
-  const scCurrent=useMemo(()=>{
+  var scCurrent=useMemo(function(){
     if(!scenario)return null;
-    const sc=SCENARIOS.find(s=>s.id===scenario); return sc?sc.steps[scStep]:null;
+    var sc=SCENARIOS.find(function(s){return s.id===scenario;});
+    return sc?sc.steps[scStep]:null;
   },[scenario,scStep]);
-  const scLines=useMemo(()=>{
+  var scLines=useMemo(function(){
     if(!scenario)return[];
-    const sc=SCENARIOS.find(s=>s.id===scenario); if(!sc)return[];
-    const lines=[];
-    for(let i=0;i<Math.min(scStep,sc.steps.length-1);i++){
-      const f=POS[sc.steps[i].comp],t=POS[sc.steps[i+1].comp];
-      if(f&&t)lines.push({x1:f.x+f.w/2,y1:f.y+f.h/2,x2:t.x+t.w/2,y2:t.y+t.h/2});
+    var sc=SCENARIOS.find(function(s){return s.id===scenario;});
+    if(!sc)return[];
+    var lines=[];
+    for(var i=0;i<Math.min(scStep,sc.steps.length-1);i++){
+      var f=POS[sc.steps[i].comp],t2=POS[sc.steps[i+1].comp];
+      if(f&&t2)lines.push({x1:f.x+f.w/2,y1:f.y+f.h/2,x2:t2.x+t2.w/2,y2:t2.y+t2.h/2});
     }
     return lines;
   },[scenario,scStep]);
 
-  const compTeamMap=useMemo(()=>{const m={};teams.forEach(t=>t.members.forEach(cid=>{m[cid]=t.id;}));return m;},[teams]);
-  const teamHLSet=useMemo(()=>{if(!teamHL)return new Set();const t=teams.find(x=>x.id===teamHL);return t?new Set(t.members):new Set();},[teamHL,teams]);
-  const dpConnSet=useMemo(()=>{if(!ac)return new Set();const s=new Set();getDpLinks(ac).forEach(lk=>s.add(lk.from===ac?lk.to:lk.from));return s;},[ac]);
+  var compTeamMap=useMemo(function(){
+    var m={};
+    teams.forEach(function(t){t.members.forEach(function(cid){m[cid]=t.id;});});
+    return m;
+  },[teams]);
+  var teamHLSet=useMemo(function(){
+    if(!teamHL)return new Set();
+    var t=teams.find(function(x){return x.id===teamHL;});
+    return t?new Set(t.members):new Set();
+  },[teamHL,teams]);
 
-  const svcL=useMemo(()=>{
+  // FIX #1: DP connections for dimming/highlighting
+  var dpConnSet=useMemo(function(){
+    if(!ac)return new Set();
+    var s=new Set();
+    getDpLinks(ac).forEach(function(lk){s.add(lk.from===ac?lk.to:lk.from);});
+    return s;
+  },[ac]);
+
+  // FIX #7: svcL lines with protocol info
+  var svcL=useMemo(function(){
     if(!ac)return[];
-    const fp=POS[ac]; if(!fp)return[];
-    return Array.from(conn).map(cid=>{
-      const tp=POS[cid]; if(!tp)return null;
-      const libs=getLibsBtw(ac,cid);
-      return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,color:O+"99",proto:libs.map(l=>LINK_DESC[l]||l).join(", ")};
+    var fp=POS[ac];if(!fp)return[];
+    return Array.from(conn).map(function(cid){
+      var tp=POS[cid];if(!tp)return null;
+      var libs=getLibsBtw(ac,cid);
+      var protoStr=libs.map(function(l){return LINK_DESC[l]||l;}).join(", ");
+      return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,color:O+"99",protoStr:protoStr};
     }).filter(Boolean);
   },[ac,conn]);
 
-  const dbLines=useMemo(()=>{
-    if(ac){const fp=POS[ac];if(!fp)return[];const r=[];DBS.forEach(db=>{if(getDbC(db.id).includes(ac)){const p=POS[db.id];if(p)r.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p.x,y2:p.y+p.h/2,color:db.color,did:db.id});}});return r;}
-    if(adb){const dp=POS[adb];if(!dp)return[];const db2=DBS.find(d=>d.id===adb);if(!db2)return[];return getDbC(adb).map(cid=>{const cp=POS[cid];if(!cp)return null;return{x1:cp.x+cp.w,y1:cp.y+cp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:db2.color,did:adb};}).filter(Boolean);}
+  var dbLines=useMemo(function(){
+    if(ac){
+      var fp=POS[ac];if(!fp)return[];
+      var r=[];
+      DBS.forEach(function(db){
+        if(getDbC(db.id).indexOf(ac)>=0){
+          var p=POS[db.id];
+          if(p)r.push({x1:fp.x+fp.w,y1:fp.y+fp.h/2,x2:p.x,y2:p.y+p.h/2,color:db.color,did:db.id});
+        }
+      });
+      return r;
+    }
+    if(adb){
+      var dp=POS[adb];if(!dp)return[];
+      var db2=DBS.find(function(d){return d.id===adb;});if(!db2)return[];
+      return getDbC(adb).map(function(cid){
+        var cp=POS[cid];if(!cp)return null;
+        return{x1:cp.x+cp.w,y1:cp.y+cp.h/2,x2:dp.x,y2:dp.y+dp.h/2,color:db2.color,did:adb};
+      }).filter(Boolean);
+    }
     return[];
   },[ac,adb]);
 
-  const dpLines=useMemo(()=>{
+  // FIX #1+#7: DP lines with direction arrow
+  var dpLines=useMemo(function(){
     if(!ac)return[];
-    const fp=POS[ac]; if(!fp)return[];
-    return getDpLinks(ac).map(lk=>{
-      const otherId=lk.from===ac?lk.to:lk.from;
-      const tp=POS[otherId]; if(!tp)return null;
-      return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,proto:lk.proto,desc:lk.desc,color:"#4ecdc4"};
+    var fp=POS[ac];if(!fp)return[];
+    return getDpLinks(ac).map(function(lk){
+      var otherId=lk.from===ac?lk.to:lk.from;
+      var tp=POS[otherId];if(!tp)return null;
+      return{x1:fp.x+fp.w/2,y1:fp.y+fp.h/2,x2:tp.x+tp.w/2,y2:tp.y+tp.h/2,proto:lk.proto,desc:lk.desc,isFrom:lk.from===ac,color:"#4ecdc4"};
     }).filter(Boolean);
   },[ac]);
 
-  const onW=useCallback(e=>{
+  var onW=useCallback(function(e){
     e.preventDefault();
-    const r=svgRef.current.getBoundingClientRect();
-    const mx=e.clientX-r.left,my=e.clientY-r.top;
-    const f=e.deltaY>0?0.93:1.07;
-    const nz=Math.max(0.12,Math.min(2.5,zoom*f));
-    setPan(p=>({x:mx-(mx-p.x)*(nz/zoom),y:my-(my-p.y)*(nz/zoom)}));
+    var r=svgRef.current.getBoundingClientRect();
+    var mx=e.clientX-r.left,my=e.clientY-r.top;
+    var f=e.deltaY>0?0.93:1.07;
+    var nz=Math.max(0.12,Math.min(2.5,zoom*f));
+    setPan(function(p){return{x:mx-(mx-p.x)*(nz/zoom),y:my-(my-p.y)*(nz/zoom)};});
     setZoom(nz);
   },[zoom]);
-  useEffect(()=>{const el=svgRef.current;if(el)el.addEventListener("wheel",onW,{passive:false});return()=>{if(el)el.removeEventListener("wheel",onW);};},[onW]);
-  const onMD=useCallback(e=>{setPanning(true);ps.current={x:e.clientX-pan.x,y:e.clientY-pan.y};dd.current=false;},[pan]);
-  const onMM=useCallback(e=>{if(panning&&ps.current){if(Math.abs(e.clientX-ps.current.x-pan.x)>3||Math.abs(e.clientY-ps.current.y-pan.y)>3)dd.current=true;setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});}},[panning,pan]);
-  const onMU=useCallback(()=>{setPanning(false);ps.current=null;},[]);
+  useEffect(function(){
+    var el=svgRef.current;
+    if(el)el.addEventListener("wheel",onW,{passive:false});
+    return function(){if(el)el.removeEventListener("wheel",onW);};
+  },[onW]);
+  var onMD=useCallback(function(e){setPanning(true);ps.current={x:e.clientX-pan.x,y:e.clientY-pan.y};dd.current=false;},[pan]);
+  var onMM=useCallback(function(e){
+    if(panning&&ps.current){
+      if(Math.abs(e.clientX-ps.current.x-pan.x)>3||Math.abs(e.clientY-ps.current.y-pan.y)>3)dd.current=true;
+      setPan({x:e.clientX-ps.current.x,y:e.clientY-ps.current.y});
+    }
+  },[panning,pan]);
+  var onMU=useCallback(function(){setPanning(false);ps.current=null;},[]);
 
   function clr(){if(!dd.current){setSel(null);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setShowAllLinks(false);}}
   function si(fn,e){e.stopPropagation();if(!dd.current)fn();}
-  function showTTip(e,t){if(!t)return;const r=svgRef.current.getBoundingClientRect();setTT({x:e.clientX-r.left+14,y:e.clientY-r.top-10,text:t});}
-  function doUndo(){if(!undoStack.length)return;setTeams(undoStack[undoStack.length-1]);setUndoStack(s=>s.slice(0,-1));}
-  function moveComp(cid,tid){setUndoStack(s=>s.concat([teams]));setTeams(prev=>prev.map(t=>{const f=t.members.filter(m=>m!==cid);return t.id===tid?{...t,members:[...f,cid]}:{...t,members:f};}));}
-
-  const activeSc=scenario?SCENARIOS.find(s=>s.id===scenario):null;
-
-  // Sidebar content
-  let side=null;
-  if(selC){
-    const cdbs=DBS.filter(db=>getDbC(db.id).includes(selC.id));
-    const lcs=[];
-    conn.forEach(cid=>{const c2=C.find(x=>x.id===cid);if(!c2)return;getLibsBtw(selC.id,cid).forEach(l=>lcs.push({cid,nm:c2.n,lib:l}));});
-    const dpL=getDpLinks(selC.id);
-    const myTeam=teams.find(t=>t.members.includes(selC.id))||null;
-    const lcsShow=showAllLinks?lcs:lcs.slice(0,10);
-    side=(
-      <div style={{padding:14}}>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
-          <span style={{background:O,color:"#fff",fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{DOMS[selC.dom]?DOMS[selC.dom].l:""}</span>
-          <span style={{background:SC[selC.sk]+"33",color:SC[selC.sk],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{SL[selC.sk]}</span>
-          {myTeam&&<span style={{background:TCOL[myTeam.id]+"33",color:TCOL[myTeam.id],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}}>{myTeam.name}</span>}
-        </div>
-        <h2 style={{margin:"0 0 2px",fontSize:17,color:T.TX,fontFamily:"monospace"}}>{selC.n}</h2>
-        <div style={{fontSize:11,color:Ob,marginBottom:8}}>{selC.s}</div>
-        {selC.desc&&<p style={{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}}>{selC.desc}</p>}
-        <div style={{background:T.BG,borderRadius:5,padding:8,marginBottom:10,border:"1px solid "+T.BD,fontSize:10}}>
-          <span style={{color:T.TD}}>Язык: </span><span style={{color:T.TX}}>{selC.lang}</span>
-          {" · "}<span style={{color:T.TD}}>Lib: </span><span style={{color:T.TX}}>{selC.fw}</span>
-          {" · "}<span style={{color:T.TD}}>Режим: </span><span style={{color:SC[selC.sk]}}>{SL[selC.sk]}</span>
-        </div>
-        {selC.det&&<div style={{marginBottom:10}}>{selC.det.map((d,i)=><div key={i} style={{fontSize:11,color:T.TX}}>· {d}</div>)}</div>}
-        {dpL.length>0&&<div style={{marginBottom:10}}>
-          <div style={{fontSize:9,color:"#4ecdc4",fontWeight:700,marginBottom:3}}>DP-ВЗАИМОДЕЙСТВИЕ ({dpL.length})</div>
-          {dpL.map((lk,i)=>{
-            const otherId=lk.from===selC.id?lk.to:lk.from;
-            const other=C.find(x=>x.id===otherId)||null;
-            return <div key={i} style={{marginBottom:4,padding:"4px 6px",borderRadius:4,background:"#4ecdc410",border:"1px solid #4ecdc422"}}>
-              <div style={{cursor:"pointer",display:"flex",gap:4,alignItems:"center"}} onClick={()=>setSel(otherId)}>
-                <span style={{color:"#4ecdc4",fontSize:10}}>{lk.from===selC.id?"→":"←"}</span>
-                <span style={{color:T.TX,fontSize:10,fontFamily:"monospace"}}>{other?other.n:otherId}</span>
-              </div>
-              <div style={{fontSize:9,color:CE,marginTop:1}}>🔌 {lk.proto}</div>
-              <div style={{fontSize:9,color:T.TD,marginTop:1}}>{lk.desc}</div>
-            </div>;
-          })}
-        </div>}
-        {cdbs.length>0&&<div style={{marginBottom:10}}>
-          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>ХРАНИЛИЩА</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
-            {cdbs.map(db=><span key={db.id} onClick={()=>{setSDb(db.id);setSel(null);}} style={{fontSize:9,color:db.color,background:db.color+"15",border:"1px solid "+db.color+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}}>{db.n}</span>)}
-          </div>
-        </div>}
-        {lcs.length>0&&<div>
-          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>СВЯЗИ ПО LIBS ({lcs.length})</div>
-          {lcsShow.map((lc,i)=><div key={i} onClick={()=>{setSel(lc.cid);setShowAllLinks(false);}} style={{fontSize:10,cursor:"pointer",padding:"2px 0",display:"flex",gap:4,alignItems:"center"}}>
-            <span style={{color:O,fontFamily:"monospace",fontSize:9}}>{lc.nm}</span>
-            <span style={{color:T.TD,fontSize:8,background:T.BG,padding:"1px 4px",borderRadius:3}}>{lc.lib}</span>
-          </div>)}
-          {lcs.length>10&&<button onClick={e=>{e.stopPropagation();setShowAllLinks(!showAllLinks);}} style={{marginTop:4,fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid "+T.BD,background:T.BG,color:O,cursor:"pointer"}}>
-            {showAllLinks?"Скрыть ↑":"Показать все ("+lcs.length+") ↓"}
-          </button>}
-        </div>}
-      </div>
-    );
-  } else if(sDb) {
-    const dbObj=DBS.find(d=>d.id===sDb)||null;
-    const dbc=dbObj?getDbC(dbObj.id):[];
-    if(dbObj) side=(
-      <div style={{padding:14}}>
-        <div style={{display:"inline-block",background:dbObj.color+"22",border:"1px solid "+dbObj.color+"44",borderRadius:4,padding:"2px 8px",marginBottom:8,fontSize:9,fontWeight:700,color:dbObj.color}}>{dbObj.sub}</div>
-        <h2 style={{fontSize:16,color:dbObj.color,margin:"0 0 6px"}}>{dbObj.n}</h2>
-        <p style={{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}}>{DB_LINK_DESC[dbObj.id]||""}</p>
-        {dbc.length>0&&<div>
-          <div style={{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}}>БЭКЕНДЫ И DAEMON'Ы ({dbc.length})</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
-            {dbc.map(cid=>{const c2=C.find(x=>x.id===cid)||null;return c2?<span key={cid} onClick={()=>{setSel(cid);setSDb(null);}} style={{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}}>{c2.n}</span>:null;})}
-          </div>
-        </div>}
-      </div>
-    );
-  } else if(sL) {
-    const layObj=LAYERS.find(l=>l.id===sL)||null;
-    const label=sL==="infra"?"INFRASTRUCTURE":(layObj?layObj.label:"");
-    side=<div style={{padding:14}}><h2 style={{fontSize:16,color:O}}>{label}</h2><p style={{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}}>{LAYER_DESC[sL]||""}</p></div>;
-  } else if(sD) {
-    const domObj=DOMS[sD]||null;
-    side=<div style={{padding:14}}>
-      <h2 style={{fontSize:16,color:O}}>{domObj?domObj.l:""}</h2>
-      <p style={{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}}>{DOM_DESC[sD]||""}</p>
-      <div style={{marginTop:10}}>{C.filter(c=>c.dom===sD).map(c=><div key={c.id} onClick={()=>{setSel(c.id);setSD(null);}} style={{padding:"3px 6px",borderRadius:4,cursor:"pointer",background:T.BG,marginBottom:2,border:"1px solid "+T.BD,fontSize:10}}>
-        <span style={{color:T.TX,fontFamily:"monospace"}}>{c.n}</span> <span style={{color:SC[c.sk],fontSize:8}}>{SL[c.sk]}</span>
-      </div>)}</div>
-    </div>;
+  function showTTip(e,t){
+    if(!t)return;
+    var r=svgRef.current.getBoundingClientRect();
+    setTT({x:e.clientX-r.left+14,y:e.clientY-r.top-10,text:t});
   }
-  const showSB=side!==null;
+  function doUndo(){
+    if(undoStack.length===0)return;
+    setTeams(undoStack[undoStack.length-1]);
+    setUndoStack(function(s){return s.slice(0,-1);});
+  }
+  function moveComp(compId,toTeamId){
+    setUndoStack(function(s){return s.concat([teams]);});
+    setTeams(function(prev){
+      return prev.map(function(t){
+        var filtered=t.members.filter(function(m){return m!==compId;});
+        if(t.id===toTeamId)return{id:t.id,name:t.name,members:filtered.concat([compId])};
+        return{id:t.id,name:t.name,members:filtered};
+      });
+    });
+  }
 
-  return (
-    <div style={{width:"100%",height:"100vh",background:T.BG,fontFamily:"system-ui,sans-serif",display:"flex",overflow:"hidden"}}>
-      {showTeams&&<div style={{width:260,minWidth:260,background:T.CD,borderRight:"1px solid "+T.BD,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        <div style={{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-          <span style={{fontSize:13,fontWeight:700,color:O}}>👥 Команды</span>
-          {undoStack.length>0&&<button onClick={doUndo} style={{background:"none",border:"1px solid "+T.BD,borderRadius:4,color:T.TX,cursor:"pointer",fontSize:10,padding:"2px 6px"}}>↩ Отмена</button>}
-        </div>
-        <div style={{padding:"0 12px 6px",fontSize:9,color:T.TD,flexShrink:0}}>Перетаскивайте бэкенды между командами</div>
-        <div style={{flex:1,overflowY:"auto",padding:"0 6px 6px"}}>
-          {teams.map(team=>{const tc=TCOL[team.id];return(
-            <div key={team.id} onDragOver={e=>{e.preventDefault();setDragOver(team.id);}} onDragLeave={()=>setDragOver(null)} onDrop={e=>{e.preventDefault();if(dragComp)moveComp(dragComp,team.id);setDragComp(null);setDragOver(null);}} style={{margin:"0 0 4px",borderRadius:6,border:"2px solid "+(dragOver===team.id?tc:tc+"22"),background:tc+"08",padding:6}}>
-              <div onClick={()=>{setTeamHL(teamHL===team.id?null:team.id);setSel(null);setSDb(null);setScenario(null);}} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:3}}>
-                <div style={{width:10,height:10,borderRadius:5,background:tc,flexShrink:0}}/>
-                <span style={{fontSize:11,fontWeight:700,color:tc,flex:1}}>{team.name}</span>
-                <span style={{fontSize:9,color:T.TD}}>{team.members.length}</span>
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
-                {team.members.map(cid=>{const comp=C.find(x=>x.id===cid)||null;if(!comp)return null;return(
-                  <span key={cid} draggable onDragStart={e=>{setDragComp(cid);e.dataTransfer.effectAllowed="move";}} onDragEnd={()=>{setDragComp(null);setDragOver(null);}} onClick={e=>{e.stopPropagation();setSel(cid);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setScenario(null);}} style={{fontSize:8,fontFamily:"monospace",padding:"2px 5px",borderRadius:3,cursor:"grab",userSelect:"none",background:tc+"18",color:tc,border:"1px solid "+tc+"33",opacity:dragComp===cid?0.3:1}}>{comp.n}</span>
-                );})}
-              </div>
-            </div>
-          );})}
-        </div>
-      </div>}
+  var activeSc=scenario?SCENARIOS.find(function(s){return s.id===scenario;}):null;
 
-      <div style={{flex:1,position:"relative"}}>
-        <svg ref={svgRef} width="100%" height="100%" style={{cursor:panning?"grabbing":"grab"}} onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={()=>{onMU();setTT(null);}} onClick={clr}>
-          <defs><filter id="gl"><feGaussianBlur stdDeviation="2" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-            {/* Layer backgrounds */}
-            {LAYERS.map(lay=>{const p=POS["L_"+lay.id];if(!p)return null;return(
-              <g key={lay.id} onClick={e=>si(()=>{setSL(lay.id);setSel(null);setSD(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
-                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={10} fill={lay.color+"08"} stroke={lay.color+"33"} strokeWidth={1.5} strokeDasharray="10,5"/>
-                <text x={p.x+10} y={p.y+16} fontSize={12} fontWeight={800} fill={lay.color} letterSpacing="1.5">{lay.label}</text>
-                <text x={p.x+10} y={p.y+28} fontSize={8} fill={T.TD}>{lay.desc}</text>
-              </g>
-            );})}
-            {POS.INFRA&&<g onClick={e=>si(()=>{setSL("infra");setSel(null);setSD(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
-              <rect x={POS.INFRA.x} y={POS.INFRA.y} width={POS.INFRA.w} height={POS.INFRA.h} rx={10} fill={O3+"08"} stroke={O3+"33"} strokeWidth={1.5} strokeDasharray="10,5"/>
-              <text x={POS.INFRA.x+8} y={POS.INFRA.y+18} fontSize={12} fontWeight={800} fill={O3} letterSpacing="1.5">INFRASTRUCTURE</text>
-            </g>}
-            {/* Domain backgrounds */}
-            {Object.keys(DOMS).map(dk=>{const dv=DOMS[dk],p=POS["D_"+dk];if(!p)return null;return(
-              <g key={dk} onClick={e=>si(()=>{setSD(dk);setSel(null);setSL(null);setSDb(null);},e)} style={{cursor:"pointer"}}>
-                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={6} fill={T.CD} stroke={dv.c+"30"}/>
-                <text x={p.x+5} y={p.y+12} fontSize={8} fontWeight={700} fill={dv.c}>{dv.l}</text>
-              </g>
-            );})}
-            {/* DB nodes */}
-            {DBS.map(db=>{const p=POS[db.id];if(!p)return null;const lit=(ac&&selCompDbs.has(db.id))||(adb===db.id);return(
-              <g key={db.id} onMouseEnter={()=>setHDb(db.id)} onMouseLeave={()=>setHDb(null)} onClick={e=>si(()=>{setSDb(sDb===db.id?null:db.id);setSel(null);setSL(null);setSD(null);},e)} style={{cursor:"pointer"}}>
-                <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={lit?db.color+"22":T.CD} stroke={lit?db.color:db.color+"44"} strokeWidth={lit?2.5:1}/>
-                <text x={p.x+6} y={p.y+11} fontSize={8} fontWeight={700} fill={db.color}>{db.n}</text>
-                <text x={p.x+6} y={p.y+21} fontSize={6} fill={T.TD}>{db.sub}</text>
-              </g>
-            );})}
-            {/* Component rects */}
-            {C.map(c=>{const p=POS[c.id];if(!p)return null;
-              const isS=sel===c.id,isC=conn.has(c.id),isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id),isDpC=dpConnSet.has(c.id);
-              const hc=isDbC&&activeDbColor?activeDbColor:null;
-              const tid=compTeamMap[c.id];const tc=tid?TCOL[tid]:null;
-              const dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
-              const scDim=scenario&&!isSc,tDim=teamHL&&!isTHL;
-              const fillC=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
-              const strC=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
-              const strW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
-              const txC=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
-              return(
-                <g key={c.id} onClick={e=>si(()=>{setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e)} style={{cursor:"pointer"}} opacity={dim||scDim||tDim?0.07:1}>
-                  {tc&&<rect x={p.x} y={p.y} width={4} height={p.h} rx={2} fill={tc} opacity={0.8}/>}
-                  <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={5} fill={fillC} stroke={strC} strokeWidth={strW}/>
-                  <text x={p.x+8} y={p.y+14} fontSize={9} fontWeight={700} fill={txC}>{c.n}</text>
-                  <text x={p.x+8} y={p.y+25} fontSize={7} fill={T.TD}>{c.s}</text>
-                  <rect x={p.x+p.w-34} y={p.y+2} width={32} height={10} rx={3} fill={SC[c.sk]+"22"} stroke={SC[c.sk]+"44"} strokeWidth={0.5}/>
-                  <text x={p.x+p.w-18} y={p.y+10} fontSize={6} fontWeight={700} fill={SC[c.sk]} textAnchor="middle">{SL[c.sk]}</text>
-                  {isScCur&&<text x={p.x+p.w/2} y={p.y-4} fontSize={10} fontWeight={800} fill="#4ecdc4" textAnchor="middle">▼</text>}
-                </g>
+  // Build sidebar
+  var side=null;
+  if(selC){
+    var cdbs=DBS.filter(function(db){return getDbC(db.id).indexOf(selC.id)>=0;});
+    var lcs=[];
+    conn.forEach(function(cid){
+      var c2=C.find(function(x){return x.id===cid;});
+      if(!c2)return;
+      getLibsBtw(selC.id,cid).forEach(function(l){lcs.push({cid:cid,nm:c2.n,lib:l});});
+    });
+    var dpL=getDpLinks(selC.id);
+    var myTeam=teams.find(function(t){return t.members.indexOf(selC.id)>=0;})||null;
+    var lcsShow=showAllLinks?lcs:lcs.slice(0,10);
+    var dpLShow=dpL.slice(0,showAllLinks?999:5);
+
+    side=React.createElement("div",{style:{padding:14}},
+      React.createElement("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}},
+        React.createElement("span",{style:{background:O,color:"#fff",fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}},(DOMS[selC.dom]?DOMS[selC.dom].l:"")),
+        React.createElement("span",{style:{background:SC[selC.sk]+"33",color:SC[selC.sk],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}},SL[selC.sk]),
+        myTeam?React.createElement("span",{style:{background:TEAM_COLORS[myTeam.id]+"33",color:TEAM_COLORS[myTeam.id],fontSize:8,padding:"2px 6px",borderRadius:3,fontWeight:700}},myTeam.name):null
+      ),
+      React.createElement("h2",{style:{margin:"0 0 2px",fontSize:17,color:T.TX,fontFamily:"monospace"}},selC.n),
+      React.createElement("div",{style:{fontSize:11,color:Ob,marginBottom:8}},selC.s),
+      selC.desc?React.createElement("p",{style:{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}},selC.desc):null,
+      React.createElement("div",{style:{background:T.BG,borderRadius:5,padding:8,marginBottom:10,border:"1px solid "+T.BD,fontSize:10}},
+        React.createElement("span",{style:{color:T.TD}},"Язык: "),
+        React.createElement("span",{style:{color:T.TX}},selC.lang),
+        " · ",
+        React.createElement("span",{style:{color:T.TD}},"Lib: "),
+        React.createElement("span",{style:{color:T.TX}},selC.fw),
+        " · ",
+        React.createElement("span",{style:{color:T.TD}},"Режим: "),
+        React.createElement("span",{style:{color:SC[selC.sk]}},SL[selC.sk])
+      ),
+      selC.det?React.createElement("div",{style:{marginBottom:10}},selC.det.map(function(d,i){return React.createElement("div",{key:i,style:{fontSize:11,color:T.TX,padding:"1px 0"}},"· "+d);})):null,
+      // FIX #1: DP links
+      dpL.length>0?React.createElement("div",{style:{marginBottom:10}},
+        React.createElement("div",{style:{fontSize:9,color:"#4ecdc4",fontWeight:700,marginBottom:3}},"DP-ВЗАИМОДЕЙСТВИЕ ("+dpL.length+")"),
+        dpLShow.map(function(lk,i){
+          var otherId=lk.from===selC.id?lk.to:lk.from;
+          var other=C.find(function(x){return x.id===otherId;})||null;
+          var dir=lk.from===selC.id?"→":"←";
+          return React.createElement("div",{key:i,style:{marginBottom:4,padding:"4px 6px",borderRadius:4,background:"#4ecdc410",border:"1px solid #4ecdc422"}},
+            React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4,cursor:"pointer"},onClick:function(){setSel(otherId);}},
+              React.createElement("span",{style:{color:"#4ecdc4",fontSize:10}},dir),
+              React.createElement("span",{style:{color:T.TX,fontSize:10,fontFamily:"monospace"}},other?other.n:otherId)
+            ),
+            React.createElement("div",{style:{fontSize:9,color:CE,marginTop:1}},"🔌 "+lk.proto),
+            React.createElement("div",{style:{fontSize:9,color:T.TD,marginTop:1}},lk.desc)
+          );
+        })
+      ):null,
+      // Datastores
+      cdbs.length>0?React.createElement("div",{style:{marginBottom:10}},
+        React.createElement("div",{style:{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}},"ХРАНИЛИЩА"),
+        React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:2}},
+          cdbs.map(function(db){
+            return React.createElement("span",{key:db.id,onClick:function(){setSDb(db.id);setSel(null);},style:{fontSize:9,color:db.color,background:db.color+"15",border:"1px solid "+db.color+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}},db.n);
+          })
+        )
+      ):null,
+      // FIX #5: lib links with show-all
+      lcs.length>0?React.createElement("div",null,
+        React.createElement("div",{style:{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}},"СВЯЗИ ПО LIBS ("+lcs.length+")"),
+        lcsShow.map(function(lc,i){
+          return React.createElement("div",{key:i,onClick:function(){setSel(lc.cid);setShowAllLinks(false);},style:{fontSize:10,cursor:"pointer",padding:"2px 0",display:"flex",alignItems:"center",gap:4}},
+            React.createElement("span",{style:{color:O,fontFamily:"monospace",fontSize:9}},lc.nm),
+            React.createElement("span",{style:{color:T.TD,fontSize:8,background:T.BG,padding:"1px 4px",borderRadius:3}},lc.lib)
+          );
+        }),
+        lcs.length>10?React.createElement("button",{onClick:function(e){e.stopPropagation();setShowAllLinks(!showAllLinks);},style:{marginTop:4,fontSize:9,padding:"2px 8px",borderRadius:4,border:"1px solid "+T.BD,background:T.BG,color:O,cursor:"pointer"}},
+          showAllLinks?"Скрыть ↑":"Показать все ("+lcs.length+") ↓"
+        ):null
+      ):null
+    );
+  } else if(sDb){
+    // FIX #4: full DB description
+    var dbObj=DBS.find(function(d){return d.id===sDb;})||null;
+    var dbc=dbObj?getDbC(dbObj.id):[];
+    if(dbObj){
+      side=React.createElement("div",{style:{padding:14}},
+        React.createElement("div",{style:{display:"inline-block",background:dbObj.color+"22",border:"1px solid "+dbObj.color+"44",borderRadius:4,padding:"2px 8px",marginBottom:8,fontSize:9,fontWeight:700,color:dbObj.color}},dbObj.sub),
+        React.createElement("h2",{style:{fontSize:16,color:dbObj.color,margin:"0 0 6px"}},dbObj.n),
+        React.createElement("p",{style:{fontSize:12,color:T.TX,lineHeight:"1.7",margin:"0 0 12px",whiteSpace:"pre-line"}},DB_LINK_DESC[dbObj.id]||""),
+        dbc.length>0?React.createElement("div",null,
+          React.createElement("div",{style:{fontSize:9,color:T.TD,fontWeight:700,marginBottom:3}},"БЭКЕНДЫ И DAEMON'Ы ("+dbc.length+")"),
+          React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:2}},
+            dbc.map(function(cid){
+              var c2=C.find(function(x){return x.id===cid;})||null;
+              return c2?React.createElement("span",{key:cid,onClick:function(){setSel(cid);setSDb(null);},style:{fontSize:9,color:O,background:O+"15",border:"1px solid "+O+"33",padding:"2px 5px",borderRadius:3,cursor:"pointer"}},c2.n):null;
+            })
+          )
+        ):null
+      );
+    }
+  } else if(sL){
+    var layLabel=sL==="infra"?"INFRASTRUCTURE":"";
+    if(sL!=="infra"){
+      var foundLay=LAYERS.find(function(l){return l.id===sL;})||null;
+      layLabel=foundLay?foundLay.label:"";
+    }
+    side=React.createElement("div",{style:{padding:14}},
+      React.createElement("h2",{style:{fontSize:16,color:O}},layLabel),
+      React.createElement("p",{style:{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}},LAYER_DESC[sL]||"")
+    );
+  } else if(sD){
+    var domObj=DOMS[sD]||null;
+    side=React.createElement("div",{style:{padding:14}},
+      React.createElement("h2",{style:{fontSize:16,color:O}},domObj?domObj.l:""),
+      React.createElement("p",{style:{fontSize:12,color:T.TX,marginTop:6,whiteSpace:"pre-line"}},DOM_DESC[sD]||""),
+      React.createElement("div",{style:{marginTop:10}},
+        C.filter(function(c){return c.dom===sD;}).map(function(c){
+          return React.createElement("div",{key:c.id,onClick:function(){setSel(c.id);setSD(null);},style:{padding:"3px 6px",borderRadius:4,cursor:"pointer",background:T.BG,marginBottom:2,border:"1px solid "+T.BD,fontSize:10}},
+            React.createElement("span",{style:{color:T.TX,fontFamily:"monospace"}},c.n),
+            " ",
+            React.createElement("span",{style:{color:SC[c.sk],fontSize:8}},SL[c.sk])
+          );
+        })
+      )
+    );
+  }
+  var showSB=side!==null;
+
+  return React.createElement("div",{style:{width:"100%",height:"100vh",background:T.BG,fontFamily:"system-ui,sans-serif",display:"flex",overflow:"hidden"}},
+    // Teams panel
+    showTeams?React.createElement("div",{style:{width:260,minWidth:260,background:T.CD,borderRight:"1px solid "+T.BD,display:"flex",flexDirection:"column",overflow:"hidden"}},
+      React.createElement("div",{style:{padding:"10px 12px 6px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}},
+        React.createElement("span",{style:{fontSize:13,fontWeight:700,color:O}},"👥 Команды"),
+        undoStack.length>0?React.createElement("button",{onClick:doUndo,style:{background:"none",border:"1px solid "+T.BD,borderRadius:4,color:T.TX,cursor:"pointer",fontSize:10,padding:"2px 6px"}},"↩ Отмена"):null
+      ),
+      React.createElement("div",{style:{padding:"0 12px 6px",fontSize:9,color:T.TD,flexShrink:0}},"Перетаскивайте бэкенды между командами"),
+      React.createElement("div",{style:{flex:1,overflowY:"auto",padding:"0 6px 6px"}},
+        teams.map(function(team){
+          var tc=TEAM_COLORS[team.id];
+          return React.createElement("div",{key:team.id,
+            onDragOver:function(e){e.preventDefault();setDragOver(team.id);},
+            onDragLeave:function(){setDragOver(null);},
+            onDrop:function(e){e.preventDefault();if(dragComp)moveComp(dragComp,team.id);setDragComp(null);setDragOver(null);},
+            style:{margin:"0 0 4px",borderRadius:6,border:"2px solid "+(dragOver===team.id?tc:tc+"22"),background:tc+"08",padding:6}},
+            React.createElement("div",{onClick:function(){setTeamHL(teamHL===team.id?null:team.id);setSel(null);setSDb(null);setScenario(null);},style:{display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:3}},
+              React.createElement("div",{style:{width:10,height:10,borderRadius:5,background:tc,flexShrink:0}}),
+              React.createElement("span",{style:{fontSize:11,fontWeight:700,color:tc,flex:1}},team.name),
+              React.createElement("span",{style:{fontSize:9,color:T.TD}},team.members.length)
+            ),
+            React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:2}},
+              team.members.map(function(cid){
+                var comp=C.find(function(x){return x.id===cid;})||null;
+                if(!comp)return null;
+                return React.createElement("span",{key:cid,draggable:true,
+                  onDragStart:function(e){setDragComp(cid);e.dataTransfer.effectAllowed="move";},
+                  onDragEnd:function(){setDragComp(null);setDragOver(null);},
+                  onClick:function(e){e.stopPropagation();setSel(cid);setSL(null);setSD(null);setSDb(null);setTeamHL(null);setScenario(null);},
+                  style:{fontSize:8,fontFamily:"monospace",padding:"2px 5px",borderRadius:3,cursor:"grab",userSelect:"none",background:tc+"18",color:tc,border:"1px solid "+tc+"33",opacity:dragComp===cid?0.3:1}
+                },comp.n);
+              })
+            )
+          );
+        })
+      )
+    ):null,
+
+    // Main area
+    React.createElement("div",{style:{flex:1,position:"relative"}},
+      React.createElement("svg",{ref:svgRef,width:"100%",height:"100%",style:{cursor:panning?"grabbing":"grab"},onMouseDown:onMD,onMouseMove:onMM,onMouseUp:onMU,onMouseLeave:function(){onMU();setTT(null);},onClick:clr},
+        React.createElement("defs",null,React.createElement("filter",{id:"gl"},React.createElement("feGaussianBlur",{stdDeviation:"2",result:"g"}),React.createElement("feMerge",null,React.createElement("feMergeNode",{in:"g"}),React.createElement("feMergeNode",{in:"SourceGraphic"})))),
+        React.createElement("g",{transform:"translate("+pan.x+","+pan.y+") scale("+zoom+")"},
+          // Layer backgrounds
+          LAYERS.map(function(lay){
+            var p=POS["L_"+lay.id];if(!p)return null;
+            return React.createElement("g",{key:lay.id,onClick:function(e){si(function(){setSL(lay.id);setSel(null);setSD(null);setSDb(null);},e);},style:{cursor:"pointer"}},
+              React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:10,fill:lay.color+"08",stroke:lay.color+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),
+              React.createElement("text",{x:p.x+10,y:p.y+16,fontSize:12,fontWeight:800,fill:lay.color,letterSpacing:"1.5"},lay.label),
+              React.createElement("text",{x:p.x+10,y:p.y+28,fontSize:8,fill:T.TD},lay.desc)
+            );
+          }),
+          POS.INFRA?React.createElement("g",{onClick:function(e){si(function(){setSL("infra");setSel(null);setSD(null);setSDb(null);},e);},style:{cursor:"pointer"}},
+            React.createElement("rect",{x:POS.INFRA.x,y:POS.INFRA.y,width:POS.INFRA.w,height:POS.INFRA.h,rx:10,fill:O3+"08",stroke:O3+"33",strokeWidth:1.5,strokeDasharray:"10,5"}),
+            React.createElement("text",{x:POS.INFRA.x+8,y:POS.INFRA.y+18,fontSize:12,fontWeight:800,fill:O3,letterSpacing:"1.5"},"INFRASTRUCTURE")
+          ):null,
+          // Domain backgrounds
+          Object.keys(DOMS).map(function(dk){
+            var dv=DOMS[dk],p=POS["D_"+dk];if(!p)return null;
+            return React.createElement("g",{key:dk,onClick:function(e){si(function(){setSD(dk);setSel(null);setSL(null);setSDb(null);},e);},style:{cursor:"pointer"}},
+              React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:6,fill:T.CD,stroke:dv.c+"30"}),
+              React.createElement("text",{x:p.x+5,y:p.y+12,fontSize:8,fontWeight:700,fill:dv.c},dv.l)
+            );
+          }),
+          // FIX #2: DB nodes — only lit when actually connected to selection
+          DBS.map(function(db){
+            var p=POS[db.id];if(!p)return null;
+            var isConnToSel=ac&&selCompDbs.has(db.id);
+            var isActive=adb===db.id;
+            var lit=isConnToSel||isActive;
+            return React.createElement("g",{key:db.id,
+              onMouseEnter:function(){setHDb(db.id);},
+              onMouseLeave:function(){setHDb(null);},
+              onClick:function(e){si(function(){setSDb(sDb===db.id?null:db.id);setSel(null);setSL(null);setSD(null);},e);},
+              style:{cursor:"pointer"}},
+              React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:lit?db.color+"22":T.CD,stroke:lit?db.color:db.color+"44",strokeWidth:lit?2.5:1}),
+              React.createElement("text",{x:p.x+6,y:p.y+11,fontSize:8,fontWeight:700,fill:db.color},db.n),
+              React.createElement("text",{x:p.x+6,y:p.y+21,fontSize:6,fill:T.TD},db.sub)
+            );
+          }),
+          // Component rects
+          C.map(function(c){
+            var p=POS[c.id];if(!p)return null;
+            var isS=sel===c.id,isC=conn.has(c.id),isDbC=dbBk.has(c.id),isSc=scHighlight.has(c.id),isScCur=scCurrent&&scCurrent.comp===c.id,isTHL=teamHLSet.has(c.id);
+            var isDpC=dpConnSet.has(c.id);
+            var hc=isDbC&&activeDbColor?activeDbColor:null;
+            var tid=compTeamMap[c.id];var tc=tid?TEAM_COLORS[tid]:null;
+            var dim=!scenario&&!teamHL&&((ac&&!isS&&!isC&&!isDpC)||(adb&&!isDbC)||(sIds&&!sIds.has(c.id)));
+            var scDim=scenario&&!isSc;
+            var tDim=teamHL&&!isTHL;
+            var fillColor=isScCur?"#4ecdc430":isSc?"#4ecdc415":isS?O+"30":isDpC?"#4ecdc415":isC?O+"12":isDbC?(hc||CE)+"15":isTHL&&tc?tc+"15":T.CD;
+            var strokeColor=isScCur?"#4ecdc4":isSc?"#4ecdc466":isS?O:isDpC?"#4ecdc466":isC?O+"66":isDbC?(hc||CE)+"55":isTHL&&tc?tc:T.BD;
+            var strokeW=isS||isScCur?2:isDpC||isC||isDbC||isSc||isTHL?1.5:1;
+            var textColor=isScCur?"#4ecdc4":isSc?"#4ecdc4":isS?T.TX:isDpC?"#4ecdc4":isC?O:isDbC?(hc||CE):isTHL&&tc?tc:T.TM;
+            return React.createElement("g",{key:c.id,
+              onClick:function(e){si(function(){setSel(sel===c.id?null:c.id);setSL(null);setSD(null);setSDb(null);setScenario(null);setTeamHL(null);setShowAllLinks(false);},e);},
+              style:{cursor:"pointer"},
+              opacity:dim||scDim||tDim?0.07:1},
+              tc?React.createElement("rect",{x:p.x,y:p.y,width:4,height:p.h,rx:2,fill:tc,opacity:0.8}):null,
+              React.createElement("rect",{x:p.x,y:p.y,width:p.w,height:p.h,rx:5,fill:fillColor,stroke:strokeColor,strokeWidth:strokeW}),
+              React.createElement("text",{x:p.x+8,y:p.y+14,fontSize:9,fontWeight:700,fill:textColor},c.n),
+              React.createElement("text",{x:p.x+8,y:p.y+25,fontSize:7,fill:T.TD},c.s),
+              React.createElement("rect",{x:p.x+p.w-34,y:p.y+2,width:32,height:10,rx:3,fill:SC[c.sk]+"22",stroke:SC[c.sk]+"44",strokeWidth:0.5}),
+              React.createElement("text",{x:p.x+p.w-18,y:p.y+10,fontSize:6,fontWeight:700,fill:SC[c.sk],textAnchor:"middle"},SL[c.sk]),
+              isScCur?React.createElement("text",{x:p.x+p.w/2,y:p.y-4,fontSize:10,fontWeight:800,fill:"#4ecdc4",textAnchor:"middle"},"▼"):null
+            );
+          }),
+          // FIX #7: Lines on top of rects
+          svcL.map(function(l,i){
+            return React.createElement("line",{key:"s"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2,opacity:0.9,strokeDasharray:"5,3",
+              onMouseEnter:function(e){showTTip(e,"🔗 Lib: "+l.protoStr);},
+              onMouseLeave:function(){setTT(null);},
+              style:{cursor:"help",pointerEvents:"stroke"}});
+          }),
+          dbLines.map(function(l,i){
+            return React.createElement("line",{key:"d"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2.5,opacity:0.7,strokeDasharray:"6,4",filter:"url(#gl)",
+              onMouseEnter:function(e){showTTip(e,DB_LINK_DESC[l.did]||"");},
+              onMouseLeave:function(){setTT(null);},
+              style:{cursor:"help",pointerEvents:"stroke"}});
+          }),
+          // FIX #1+#7: DP lines with arrow
+          dpLines.map(function(l,i){
+            var dx=l.x2-l.x1,dy=l.y2-l.y1,len=Math.sqrt(dx*dx+dy*dy)||1;
+            var mx=(l.x1+l.x2)/2,my=(l.y1+l.y2)/2;
+            var nx=dx/len,ny=dy/len;
+            var ax=mx-nx*8+ny*5,ay=my-ny*8-nx*5,bx=mx-nx*8-ny*5,by=my-ny*8+nx*5;
+            var pts=mx+","+my+" "+ax+","+ay+" "+bx+","+by;
+            return React.createElement("g",{key:"dp"+i},
+              React.createElement("line",{x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:l.color,strokeWidth:2.5,opacity:0.9,strokeDasharray:"8,3",
+                onMouseEnter:function(e){showTTip(e,"⚡ "+l.proto+"\n"+l.desc);},
+                onMouseLeave:function(){setTT(null);},
+                style:{cursor:"help",pointerEvents:"stroke"}}),
+              React.createElement("polygon",{points:pts,fill:l.color,opacity:0.9})
+            );
+          }),
+          // Scenario lines
+          scLines.map(function(l,i){
+            return React.createElement("line",{key:"sc"+i,x1:l.x1,y1:l.y1,x2:l.x2,y2:l.y2,stroke:"#4ecdc4",strokeWidth:3,opacity:0.8,strokeDasharray:"8,4"});
+          }),
+          // Legend
+          React.createElement("g",{transform:"translate("+LP+","+(POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500)+")"},
+            React.createElement("rect",{x:0,y:0,width:420,height:18,rx:4,fill:T.CD+"dd",stroke:T.BD}),
+            [
+              {c:O,l:"Lib-связь",x:6},
+              {c:CE,l:"PERM",x:62},
+              {c:CE2,l:"RUN",x:98},
+              {c:CC,l:"CH",x:126},
+              {c:CS,l:"SQ",x:148},
+              {c:CR,l:"RDB",x:170},
+              {c:"#4ecdc4",l:"DP / Сценарий",x:194}
+            ].map(function(x,i){
+              return React.createElement("g",{key:i},
+                React.createElement("rect",{x:x.x,y:6,width:8,height:3,rx:1,fill:x.c}),
+                React.createElement("text",{x:x.x+10,y:11,fontSize:6,fill:T.TM},x.l)
               );
-            })}
-            {/* Lines on top */}
-            {svcL.map((l,i)=><line key={"s"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2} opacity={0.9} strokeDasharray="5,3" onMouseEnter={e=>showTTip(e,"🔗 "+l.proto)} onMouseLeave={()=>setTT(null)} style={{cursor:"help",pointerEvents:"stroke"}}/>)}
-            {dbLines.map((l,i)=><line key={"d"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2.5} opacity={0.7} strokeDasharray="6,4" filter="url(#gl)" onMouseEnter={e=>showTTip(e,DB_LINK_DESC[l.did]||"")} onMouseLeave={()=>setTT(null)} style={{cursor:"help",pointerEvents:"stroke"}}/>)}
-            {dpLines.map((l,i)=>{
-              const dx=l.x2-l.x1,dy=l.y2-l.y1,len=Math.sqrt(dx*dx+dy*dy)||1;
-              const mx=(l.x1+l.x2)/2,my=(l.y1+l.y2)/2,nx=dx/len,ny=dy/len;
-              const pts=`${mx},${my} ${mx-nx*8+ny*5},${my-ny*8-nx*5} ${mx-nx*8-ny*5},${my-ny*8+nx*5}`;
-              return <g key={"dp"+i}>
-                <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke={l.color} strokeWidth={2.5} opacity={0.9} strokeDasharray="8,3" onMouseEnter={e=>showTTip(e,"⚡ "+l.proto+"\n"+l.desc)} onMouseLeave={()=>setTT(null)} style={{cursor:"help",pointerEvents:"stroke"}}/>
-                <polygon points={pts} fill={l.color} opacity={0.9}/>
-              </g>;
-            })}
-            {scLines.map((l,i)=><line key={"sc"+i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#4ecdc4" strokeWidth={3} opacity={0.8} strokeDasharray="8,4"/>)}
-            {/* Legend */}
-            <g transform={`translate(${LP},${POS["L_data"]?POS["L_data"].y+POS["L_data"].h+14:500})`}>
-              <rect x={0} y={0} width={420} height={18} rx={4} fill={T.CD+"dd"} stroke={T.BD}/>
-              {[{c:O,l:"Lib-связь",x:6},{c:CE,l:"PERM",x:64},{c:CE2,l:"RUN",x:100},{c:CC,l:"CH",x:128},{c:CS,l:"SQ",x:150},{c:CR,l:"RDB",x:172},{c:"#4ecdc4",l:"DP / Сценарий",x:196}].map((x,i)=>(
-                <g key={i}><rect x={x.x} y={6} width={8} height={3} rx={1} fill={x.c}/><text x={x.x+10} y={11} fontSize={6} fill={T.TM}>{x.l}</text></g>
-              ))}
-              <text x={320} y={11} fontSize={6} fill={T.TD}>hover на линию = протокол</text>
-            </g>
-          </g>
-        </svg>
+            }),
+            React.createElement("text",{x:310,y:11,fontSize:6,fill:T.TD},"hover на линию = протокол")
+          )
+        )
+      ),
 
-        {tt&&<div style={{position:"absolute",left:Math.min(tt.x,window.innerWidth-270),top:Math.max(10,tt.y),background:T.CD+"f8",border:"1px solid "+T.BD,borderRadius:8,padding:"8px 12px",maxWidth:260,zIndex:30,pointerEvents:"none",fontSize:11,color:T.TX,lineHeight:"1.6",whiteSpace:"pre-line",boxShadow:"0 4px 16px #0004"}}>{tt.text}</div>}
+      // Tooltip
+      tt?React.createElement("div",{style:{position:"absolute",left:Math.min(tt.x,window.innerWidth-270),top:Math.max(10,tt.y),background:T.CD+"f8",border:"1px solid "+T.BD,borderRadius:8,padding:"8px 12px",maxWidth:260,zIndex:30,pointerEvents:"none",fontSize:11,color:T.TX,lineHeight:"1.6",whiteSpace:"pre-line",boxShadow:"0 4px 16px #0004"}},tt.text):null,
 
-        <div style={{position:"absolute",top:8,left:8,zIndex:20,display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-          <input value={search} onChange={e=>{setSearch(e.target.value);setScenario(null);setTeamHL(null);}} placeholder="🔍 Поиск по имени/описанию..." style={{width:210,padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.BG+"ee",color:T.TX,fontSize:11,outline:"none"}}/>
-          <select value={scenario||""} onChange={e=>{const v=e.target.value;setScenario(v||null);setScStep(0);setSel(null);setSDb(null);setTeamHL(null);}} style={{padding:"5px 6px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,fontSize:10,outline:"none",cursor:"pointer"}}>
-            <option value="">📋 Сценарии</option>
-            {SCENARIOS.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <button onClick={()=>setShowTeams(!showTeams)} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}}>👥 Команды</button>
-          <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} style={{padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:10}}>{theme==="dark"?"☀️":"🌙"}</button>
-        </div>
+      // Top controls
+      React.createElement("div",{style:{position:"absolute",top:8,left:8,zIndex:20,display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}},
+        React.createElement("input",{value:search,onChange:function(e){setSearch(e.target.value);setScenario(null);setTeamHL(null);},placeholder:"🔍 Поиск по имени/описанию...",style:{width:210,padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.BG+"ee",color:T.TX,fontSize:11,outline:"none"}}),
+        React.createElement("select",{value:scenario||"",onChange:function(e){var v=e.target.value;setScenario(v||null);setScStep(0);setSel(null);setSDb(null);setTeamHL(null);},style:{padding:"5px 6px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,fontSize:10,outline:"none",cursor:"pointer"}},
+          React.createElement("option",{value:""},"📋 Сценарии"),
+          SCENARIOS.map(function(s){return React.createElement("option",{key:s.id,value:s.id},s.name);})
+        ),
+        React.createElement("button",{onClick:function(){setShowTeams(!showTeams);},style:{padding:"5px 8px",borderRadius:6,border:"1px solid "+(showTeams?O:T.BD),background:showTeams?O+"20":T.CD,color:showTeams?O:T.TX,cursor:"pointer",fontSize:10,fontWeight:600}},"👥 Команды"),
+        React.createElement("button",{onClick:function(){setTheme(theme==="dark"?"light":"dark");},style:{padding:"5px 8px",borderRadius:6,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:10}},theme==="dark"?"☀️":"🌙")
+      ),
 
-        {activeSc&&<div style={{position:"absolute",bottom:42,left:8,right:showSB?390:8,zIndex:20,background:T.CD+"f5",border:"1px solid #4ecdc444",borderRadius:8,padding:"10px 14px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <span style={{fontSize:12,color:"#4ecdc4",fontWeight:700}}>📋 {activeSc.name}</span>
-            <span style={{fontSize:9,color:T.TD}}>{scStep+1} из {activeSc.steps.length}</span>
-          </div>
-          <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:8}}>
-            <button onClick={()=>setScStep(Math.max(0,scStep-1))} disabled={scStep===0} style={{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep===0?0.4:1}}>←</button>
-            {activeSc.steps.map((s,i)=><div key={i} onClick={()=>setScStep(i)} style={{flex:1,height:4,borderRadius:2,background:i<=scStep?"#4ecdc4":T.BD,opacity:i===scStep?1:0.5,cursor:"pointer"}}/>)}
-            <button onClick={()=>setScStep(Math.min(activeSc.steps.length-1,scStep+1))} disabled={scStep>=activeSc.steps.length-1} style={{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep>=activeSc.steps.length-1?0.4:1}}>→</button>
-          </div>
-          <div style={{background:T.BG,borderRadius:6,padding:"8px 12px",border:"1px solid #4ecdc433"}}>
-            <div style={{fontSize:12,color:"#4ecdc4",fontWeight:700,marginBottom:4}}>{activeSc.steps[scStep].label}</div>
-            <div style={{fontSize:11,color:T.TX,whiteSpace:"pre-line",lineHeight:"1.6"}}>{activeSc.steps[scStep].desc}</div>
-          </div>
-        </div>}
+      // FIX #6: Scenario panel with full step desc
+      activeSc?React.createElement("div",{style:{position:"absolute",bottom:42,left:8,right:showSB?390:8,zIndex:20,background:T.CD+"f5",border:"1px solid #4ecdc444",borderRadius:8,padding:"10px 14px"}},
+        React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}},
+          React.createElement("span",{style:{fontSize:12,color:"#4ecdc4",fontWeight:700}},"📋 "+activeSc.name),
+          React.createElement("span",{style:{fontSize:9,color:T.TD}},scStep+1+" из "+activeSc.steps.length)
+        ),
+        React.createElement("div",{style:{display:"flex",gap:4,alignItems:"center",marginBottom:8}},
+          React.createElement("button",{onClick:function(){setScStep(Math.max(0,scStep-1));},disabled:scStep===0,style:{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep===0?0.4:1}},"←"),
+          activeSc.steps.map(function(s,i){
+            return React.createElement("div",{key:i,onClick:function(){setScStep(i);},style:{flex:1,height:4,borderRadius:2,background:i<=scStep?"#4ecdc4":T.BD,opacity:i===scStep?1:0.5,cursor:"pointer"}});
+          }),
+          React.createElement("button",{onClick:function(){setScStep(Math.min(activeSc.steps.length-1,scStep+1));},disabled:scStep>=activeSc.steps.length-1,style:{padding:"3px 10px",borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:12,opacity:scStep>=activeSc.steps.length-1?0.4:1}},"→")
+        ),
+        React.createElement("div",{style:{background:T.BG,borderRadius:6,padding:"8px 12px",border:"1px solid #4ecdc433"}},
+          React.createElement("div",{style:{fontSize:12,color:"#4ecdc4",fontWeight:700,marginBottom:4}},activeSc.steps[scStep].label),
+          React.createElement("div",{style:{fontSize:11,color:T.TX,whiteSpace:"pre-line",lineHeight:"1.6"}},activeSc.steps[scStep].desc)
+        )
+      ):null,
 
-        <div style={{position:"absolute",bottom:8,left:8,display:"flex",gap:3,zIndex:20}}>
-          <button onClick={()=>setZoom(Math.min(2.5,zoom*1.2))} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>+</button>
-          <button onClick={()=>setZoom(Math.max(0.12,zoom/1.2))} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>−</button>
-          <button onClick={()=>{setZoom(0.42);setPan({x:0,y:0});}} style={{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}}>⟲</button>
-        </div>
-      </div>
+      // Zoom controls
+      React.createElement("div",{style:{position:"absolute",bottom:8,left:8,display:"flex",gap:3,zIndex:20}},
+        React.createElement("button",{onClick:function(){setZoom(Math.min(2.5,zoom*1.2));},style:{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}},"+"),
+        React.createElement("button",{onClick:function(){setZoom(Math.max(0.12,zoom/1.2));},style:{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}},"−"),
+        React.createElement("button",{onClick:function(){setZoom(0.42);setPan({x:0,y:0});},style:{width:28,height:28,borderRadius:5,border:"1px solid "+T.BD,background:T.CD,color:T.TX,cursor:"pointer",fontSize:14,fontWeight:700}},"⟲")
+      )
+    ),
 
-      {showSB&&<div style={{width:380,minWidth:380,background:T.CD,borderLeft:"1px solid "+T.BD,overflowY:"auto",display:"flex",flexDirection:"column"}}>
-        <div style={{display:"flex",justifyContent:"flex-end",padding:"6px 10px 0"}}>
-          <button onClick={()=>{setSel(null);setSL(null);setSD(null);setSDb(null);}} style={{background:"none",border:"none",color:T.TD,cursor:"pointer",fontSize:16}}>✕</button>
-        </div>
-        <div style={{flex:1,overflowY:"auto"}}>{side}</div>
-      </div>}
-    </div>
+    // Sidebar
+    showSB?React.createElement("div",{style:{width:380,minWidth:380,background:T.CD,borderLeft:"1px solid "+T.BD,overflowY:"auto",display:"flex",flexDirection:"column"}},
+      React.createElement("div",{style:{display:"flex",justifyContent:"flex-end",padding:"6px 10px 0"}},
+        React.createElement("button",{onClick:function(){setSel(null);setSL(null);setSD(null);setSDb(null);},style:{background:"none",border:"none",color:T.TD,cursor:"pointer",fontSize:16}},"✕")
+      ),
+      React.createElement("div",{style:{flex:1,overflowY:"auto"}},side)
+    ):null
   );
 }
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
